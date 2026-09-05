@@ -134,4 +134,3 @@ Ran 15 tests in 0.1s -> OK
 
 ## 📚 Дополнительная документация
 - **[PROJECT_OVERVIEW.md](file:///c:/Users/zqrey3/Desktop/Scritps/Python/videoTVTranslation/PROJECT_OVERVIEW.md)** — полное описание протоколов, сетевого взаимодействия, защиты от дедлоков и файловых блокировок Windows.
-- **[AGENTS.md](file:///c:/Users/zqrey3/Desktop/Scritps/Python/videoTVTranslation/AGENTS.md)** — регламент и правила разработки для AI-агентов.
