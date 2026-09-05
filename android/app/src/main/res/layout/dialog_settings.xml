@@ -2,15 +2,21 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/scrollView"
     android:layout_width="520dp"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_card_dark"
     android:overScrollMode="never"
+    android:fillViewport="true"
+    android:focusable="false"
+    android:descendantFocusability="afterDescendants"
     android:padding="28dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:focusable="false"
+        android:descendantFocusability="afterDescendants"
         android:orientation="vertical">
 
         <!-- Шапка диалога -->
@@ -73,6 +79,9 @@
             android:layout_marginTop="6dp"
             android:background="@drawable/bg_input_focused"
             android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:nextFocusUp="@id/etServerHost"
+            android:nextFocusDown="@id/rbRtsp"
             android:fontFamily="monospace"
             android:hint="@string/server_host_hint"
             android:imeOptions="actionNext"
@@ -99,6 +108,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
+            android:focusable="false"
             android:orientation="vertical">
 
             <RadioButton
@@ -110,6 +120,8 @@
                 android:buttonTint="@color/brand_emerald"
                 android:checked="true"
                 android:focusable="true"
+                android:nextFocusUp="@id/etServerHost"
+                android:nextFocusDown="@id/rbHls"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:text="@string/protocol_rtsp"
@@ -123,6 +135,8 @@
                 android:background="@drawable/bg_radio_focused"
                 android:buttonTint="@color/brand_emerald"
                 android:focusable="true"
+                android:nextFocusUp="@id/rbRtsp"
+                android:nextFocusDown="@id/etPort"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:text="@string/protocol_hls"
@@ -136,6 +150,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
             android:baselineAligned="false"
+            android:focusable="false"
             android:orientation="horizontal">
 
             <LinearLayout
@@ -143,6 +158,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
                 android:layout_weight="1"
+                android:focusable="false"
                 android:orientation="vertical">
 
                 <TextView
@@ -161,6 +177,10 @@
                     android:layout_marginTop="4dp"
                     android:background="@drawable/bg_input_focused"
                     android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:nextFocusUp="@id/rbHls"
+                    android:nextFocusRight="@id/etStreamPath"
+                    android:nextFocusDown="@id/rbSchedGlobal"
                     android:fontFamily="monospace"
                     android:inputType="number"
                     android:paddingStart="12dp"
@@ -176,6 +196,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
+                android:focusable="false"
                 android:orientation="vertical">
 
                 <TextView
@@ -193,6 +214,10 @@
                     android:layout_marginTop="4dp"
                     android:background="@drawable/bg_input_focused"
                     android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:nextFocusUp="@id/rbHls"
+                    android:nextFocusLeft="@id/etPort"
+                    android:nextFocusDown="@id/rbSchedGlobal"
                     android:fontFamily="monospace"
                     android:inputType="textNoSuggestions"
                     android:paddingStart="12dp"
@@ -225,6 +250,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
+            android:focusable="false"
             android:orientation="vertical">
 
             <RadioButton
@@ -236,6 +262,8 @@
                 android:buttonTint="@color/brand_emerald"
                 android:checked="true"
                 android:focusable="true"
+                android:nextFocusUp="@id/etPort"
+                android:nextFocusDown="@id/rbSched247"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:text="@string/schedule_mode_global"
@@ -250,6 +278,8 @@
                 android:background="@drawable/bg_radio_focused"
                 android:buttonTint="@color/brand_emerald"
                 android:focusable="true"
+                android:nextFocusUp="@id/rbSchedGlobal"
+                android:nextFocusDown="@id/rbSchedInterval"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:text="@string/schedule_mode_24_7"
@@ -263,6 +293,8 @@
                 android:background="@drawable/bg_radio_focused"
                 android:buttonTint="@color/brand_emerald"
                 android:focusable="true"
+                android:nextFocusUp="@id/rbSched247"
+                android:nextFocusDown="@id/btnCancel"
                 android:paddingStart="8dp"
                 android:paddingEnd="8dp"
                 android:text="@string/schedule_mode_interval"
@@ -276,6 +308,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:baselineAligned="false"
+            android:focusable="false"
             android:orientation="horizontal"
             android:visibility="gone">
 
@@ -284,6 +317,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginEnd="8dp"
                 android:layout_weight="1"
+                android:focusable="false"
                 android:orientation="vertical">
 
                 <TextView
@@ -301,6 +335,10 @@
                     android:layout_marginTop="4dp"
                     android:background="@drawable/bg_input_focused"
                     android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:nextFocusUp="@id/rbSchedInterval"
+                    android:nextFocusRight="@id/etScheduleEnd"
+                    android:nextFocusDown="@id/btnCancel"
                     android:fontFamily="monospace"
                     android:hint="08:00"
                     android:inputType="time"
@@ -317,6 +355,7 @@
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
+                android:focusable="false"
                 android:orientation="vertical">
 
                 <TextView
@@ -334,6 +373,10 @@
                     android:layout_marginTop="4dp"
                     android:background="@drawable/bg_input_focused"
                     android:focusable="true"
+                    android:focusableInTouchMode="true"
+                    android:nextFocusUp="@id/rbSchedInterval"
+                    android:nextFocusLeft="@id/etScheduleStart"
+                    android:nextFocusDown="@id/btnSaveConnect"
                     android:fontFamily="monospace"
                     android:hint="20:00"
                     android:inputType="time"
@@ -364,16 +407,22 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="22dp"
+            android:focusable="false"
             android:gravity="end"
             android:orientation="horizontal">
 
-            <Button
+            <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnCancel"
                 android:layout_width="wrap_content"
                 android:layout_height="46dp"
                 android:layout_marginEnd="12dp"
                 android:background="@drawable/bg_btn_secondary_focused"
+                app:backgroundTint="@null"
                 android:focusable="true"
+                android:nextFocusLeft="@id/btnCancel"
+                android:nextFocusRight="@id/btnSaveConnect"
+                android:nextFocusUp="@id/rbSchedInterval"
+                android:nextFocusDown="@id/btnCancel"
                 android:fontFamily="sans-serif-medium"
                 android:paddingStart="20dp"
                 android:paddingEnd="20dp"
@@ -381,12 +430,17 @@
                 android:textColor="@color/text_primary"
                 android:textSize="13sp" />
 
-            <Button
+            <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnSaveConnect"
                 android:layout_width="wrap_content"
                 android:layout_height="46dp"
                 android:background="@drawable/bg_btn_focused"
+                app:backgroundTint="@null"
                 android:focusable="true"
+                android:nextFocusLeft="@id/btnCancel"
+                android:nextFocusRight="@id/btnSaveConnect"
+                android:nextFocusUp="@id/rbSchedInterval"
+                android:nextFocusDown="@id/btnSaveConnect"
                 android:fontFamily="sans-serif-medium"
                 android:paddingStart="24dp"
                 android:paddingEnd="24dp"

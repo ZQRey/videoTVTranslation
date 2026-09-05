@@ -1,14 +1,19 @@
 package com.example.streamclient.ui
 
-import android.app.Dialog
+import android.content.Context
 import android.content.DialogInterface
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.Toast
 import androidx.core.widget.doAfterTextChanged
 import androidx.fragment.app.DialogFragment
+import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.lifecycleScope
 import com.example.streamclient.R
 import com.example.streamclient.data.AppPreferences
@@ -57,15 +62,77 @@ class SettingsDialogFragment : DialogFragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         setupListeners()
+        setupDpadNavigation()
         loadCurrentSettings()
     }
 
+    private var lastBackPressTime = 0L
+
     override fun onStart() {
         super.onStart()
-        dialog?.window?.setLayout(
-            resources.getDimensionPixelSize(R.dimen.dialog_width_fallback),
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        )
+        dialog?.window?.apply {
+            setLayout(
+                resources.getDimensionPixelSize(R.dimen.dialog_width_fallback),
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            // Гарантируем, что окно диалога перехватывает фокус для пульта ДУ
+            clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+        }
+
+        // Перехват кнопки Назад для подтверждения выхода при незаданных настройках
+        dialog?.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                val isConfigured = (activity as? MainActivity)?.isCurrentConfigConfigured == true
+                if (!isConfigured) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastBackPressTime < 2000) {
+                        activity?.finish()
+                    } else {
+                        lastBackPressTime = now
+                        Toast.makeText(
+                            requireContext(),
+                            "Нажмите [Назад] еще раз для выхода из приложения",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    return@setOnKeyListener true
+                }
+            }
+            false
+        }
+
+        // Запрос начального фокуса после отрисовки окна
+        binding.root.post {
+            val host = binding.etServerHost.text?.toString()?.trim().orEmpty()
+            if (host.isEmpty()) {
+                binding.etServerHost.requestFocus()
+            } else {
+                binding.btnSaveConnect.requestFocus()
+            }
+        }
+    }
+
+    /**
+     * Безопасный показ диалога, защищенный от исключений жизненного цикла FragmentManager.
+     */
+    fun showSafely(fragmentManager: FragmentManager, tag: String = TAG) {
+        if (fragmentManager.isDestroyed) {
+            return
+        }
+        val existing = fragmentManager.findFragmentByTag(tag)
+        if (existing != null && existing.isAdded) {
+            return
+        }
+        try {
+            val ft = fragmentManager.beginTransaction()
+            if (existing != null) {
+                ft.remove(existing)
+            }
+            ft.add(this, tag)
+            ft.commitAllowingStateLoss()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Ошибка безопасного показа диалога настроек", e)
+        }
     }
 
     private fun loadCurrentSettings() {
@@ -88,6 +155,7 @@ class SettingsDialogFragment : DialogFragment() {
 
             binding.etStreamPath.setText(config.streamPath)
 
+            val isInterval = config.scheduleMode == "interval"
             when (config.scheduleMode) {
                 "24/7" -> {
                     binding.rbSched247.isChecked = true
@@ -104,15 +172,9 @@ class SettingsDialogFragment : DialogFragment() {
             }
             binding.etScheduleStart.setText(config.scheduleStart)
             binding.etScheduleEnd.setText(config.scheduleEnd)
+            updateDynamicFocusPaths(isInterval)
 
             updatePreview()
-
-            // Первоначальный фокус на поле ввода или кнопке сохранения
-            if (config.isConfigured) {
-                binding.btnSaveConnect.requestFocus()
-            } else {
-                binding.etServerHost.requestFocus()
-            }
         }
     }
 
@@ -135,11 +197,9 @@ class SettingsDialogFragment : DialogFragment() {
 
         // Переключение режима расписания
         binding.rgScheduleMode.setOnCheckedChangeListener { _, checkedId ->
-            if (checkedId == R.id.rbSchedInterval) {
-                binding.layoutScheduleInterval.visibility = View.VISIBLE
-            } else {
-                binding.layoutScheduleInterval.visibility = View.GONE
-            }
+            val isInterval = checkedId == R.id.rbSchedInterval
+            binding.layoutScheduleInterval.visibility = if (isInterval) View.VISIBLE else View.GONE
+            updateDynamicFocusPaths(isInterval)
         }
 
         // Обновление предпросмотра URL при изменении полей
@@ -155,6 +215,130 @@ class SettingsDialogFragment : DialogFragment() {
         // Кнопка отмены
         binding.btnCancel.setOnClickListener {
             dismiss()
+        }
+    }
+
+    /**
+     * Динамическое переключение путей навигации пульта ДУ в зависимости от видимости полей интервала.
+     */
+    private fun updateDynamicFocusPaths(isIntervalVisible: Boolean) {
+        if (isIntervalVisible) {
+            binding.rbSchedInterval.nextFocusDownId = R.id.etScheduleStart
+            binding.btnCancel.nextFocusUpId = R.id.etScheduleStart
+            binding.btnSaveConnect.nextFocusUpId = R.id.etScheduleEnd
+        } else {
+            binding.rbSchedInterval.nextFocusDownId = R.id.btnCancel
+            binding.btnCancel.nextFocusUpId = R.id.rbSchedInterval
+            binding.btnSaveConnect.nextFocusUpId = R.id.rbSchedInterval
+        }
+    }
+
+    /**
+     * Комплексная настройка навигации стрелками пульта ДУ (D-Pad) для текстовых полей и автоскролла.
+     */
+    private fun setupDpadNavigation() {
+        val editTexts = listOf(
+            binding.etServerHost,
+            binding.etPort,
+            binding.etStreamPath,
+            binding.etScheduleStart,
+            binding.etScheduleEnd
+        )
+
+        for (et in editTexts) {
+            et.setOnKeyListener { v, keyCode, event ->
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            val nextId = v.nextFocusDownId
+                            if (nextId != View.NO_ID) {
+                                binding.root.findViewById<View>(nextId)?.requestFocus()
+                                return@setOnKeyListener true
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            val prevId = v.nextFocusUpId
+                            if (prevId != View.NO_ID) {
+                                binding.root.findViewById<View>(prevId)?.requestFocus()
+                                return@setOnKeyListener true
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            val etView = v as? EditText
+                            if (etView == null || etView.selectionEnd >= (etView.text?.length ?: 0)) {
+                                val rightId = v.nextFocusRightId
+                                if (rightId != View.NO_ID) {
+                                    binding.root.findViewById<View>(rightId)?.requestFocus()
+                                    return@setOnKeyListener true
+                                }
+                            }
+                        }
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            val etView = v as? EditText
+                            if (etView == null || etView.selectionStart <= 0) {
+                                val leftId = v.nextFocusLeftId
+                                if (leftId != View.NO_ID) {
+                                    binding.root.findViewById<View>(leftId)?.requestFocus()
+                                    return@setOnKeyListener true
+                                }
+                            }
+                        }
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_DPAD_CENTER -> {
+                            // Открытие экранной клавиатуры для ввода
+                            val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                            imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        }
+                    }
+                }
+                false
+            }
+
+            // Автоматическая прокрутка ScrollView при фокусе элемента
+            et.setOnFocusChangeListener { v, hasFocus ->
+                if (hasFocus) {
+                    binding.scrollView.requestChildFocus(v, v)
+                }
+            }
+        }
+
+        // Поддержка кнопок пульта OK / DPAD_CENTER для мгновенного выбора RadioButton
+        val radioButtons = listOf(
+            binding.rbRtsp,
+            binding.rbHls,
+            binding.rbSchedGlobal,
+            binding.rbSched247,
+            binding.rbSchedInterval
+        )
+        for (rb in radioButtons) {
+            rb.setOnKeyListener { v, keyCode, event ->
+                if (event.action == KeyEvent.ACTION_DOWN &&
+                    (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
+                ) {
+                    (v as? android.widget.RadioButton)?.isChecked = true
+                    return@setOnKeyListener true
+                }
+                false
+            }
+        }
+
+        // Автоскролл для остальных элементов управления
+        val otherFocusables = listOf(
+            binding.rbRtsp,
+            binding.rbHls,
+            binding.rbSchedGlobal,
+            binding.rbSched247,
+            binding.rbSchedInterval,
+            binding.btnCancel,
+            binding.btnSaveConnect
+        )
+
+        for (item in otherFocusables) {
+            item.setOnFocusChangeListener { v, hasFocus ->
+                if (hasFocus) {
+                    binding.scrollView.requestChildFocus(v, v)
+                }
+            }
         }
     }
 

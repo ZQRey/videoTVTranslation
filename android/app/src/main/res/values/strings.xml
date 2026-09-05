@@ -38,4 +38,9 @@
     <string name="schedule_mode_interval">Свой интервал времени</string>
     <string name="schedule_start_label">Время начала:</string>
     <string name="schedule_end_label">Время конца:</string>
+
+    <!-- Первичная настройка (Unconfigured State) -->
+    <string name="unconfigured_title">StreamClient TV</string>
+    <string name="unconfigured_subtitle">Для начала трансляции укажите сетевой адрес сервера вещания</string>
+    <string name="btn_configure_server">⚙ Настроить сервер</string>
 </resources>

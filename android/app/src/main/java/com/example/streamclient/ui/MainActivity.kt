@@ -43,7 +43,11 @@ class MainActivity : AppCompatActivity() {
 
     private var currentConfig: StreamConfig = StreamConfig()
     private var isSettingsOpen = false
+    private var hasCheckedInitialConfig = false
     private var backPressedTime = 0L
+
+    val isCurrentConfigConfigured: Boolean
+        get() = currentConfig.isConfigured
 
     private var statusPollingJob: Job? = null
     private var isStandbyActive = false
@@ -72,6 +76,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         SystemBarsUtil.hideSystemBars(this)
+        // При возвращении на экран, если настройки так и не были заданы и окно закрыто — напоминаем
+        if (hasCheckedInitialConfig && !currentConfig.isConfigured && !isSettingsOpen) {
+            binding.unconfiguredOverlay.visibility = View.VISIBLE
+            binding.btnInitialConfigure.requestFocus()
+            openSettingsDialog()
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -89,11 +99,15 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val config = appPreferences.getStreamConfig()
             currentConfig = config
+            hasCheckedInitialConfig = true
 
             if (!config.isConfigured) {
                 Log.i(TAG, "Первый запуск: адрес сервера не задан. Открытие диалога настроек.")
+                binding.unconfiguredOverlay.visibility = View.VISIBLE
+                binding.btnInitialConfigure.requestFocus()
                 openSettingsDialog()
             } else {
+                binding.unconfiguredOverlay.visibility = View.GONE
                 binding.tvStreamUrl.text = config.toDisplayString()
                 playerController.start(config)
                 startStatusPolling(config.serverHost)
@@ -104,6 +118,11 @@ class MainActivity : AppCompatActivity() {
     private fun setupUI() {
         // Кнопка вызова настроек из верхнего HUD
         binding.btnOpenSettings.setOnClickListener {
+            openSettingsDialog()
+        }
+
+        // Кнопка первичной настройки на оверлее приветствия
+        binding.btnInitialConfigure.setOnClickListener {
             openSettingsDialog()
         }
 
@@ -190,13 +209,21 @@ class MainActivity : AppCompatActivity() {
      */
     private fun openSettingsDialog() {
         if (isSettingsOpen) return
+        val existing = supportFragmentManager.findFragmentByTag(SettingsDialogFragment.TAG)
+        if (existing != null && existing.isAdded) {
+            isSettingsOpen = true
+            return
+        }
         isSettingsOpen = true
 
         playerController.pause()
 
         val dialog = SettingsDialogFragment.newInstance()
+        // Если адрес сервера еще не был сохранен — блокируем случайное закрытие в пустоту
+        dialog.isCancelable = currentConfig.isConfigured
         dialog.onConfigSavedListener = { newConfig ->
             currentConfig = newConfig
+            binding.unconfiguredOverlay.visibility = View.GONE
             binding.tvStreamUrl.text = newConfig.toDisplayString()
             playerController.start(newConfig)
             startStatusPolling(newConfig.serverHost)
@@ -205,13 +232,21 @@ class MainActivity : AppCompatActivity() {
             isSettingsOpen = false
             SystemBarsUtil.hideSystemBars(this)
 
-            // Если адрес задан, возобновляем воспроизведение
             if (currentConfig.isConfigured) {
+                binding.unconfiguredOverlay.visibility = View.GONE
                 playerController.resume()
+            } else {
+                binding.unconfiguredOverlay.visibility = View.VISIBLE
+                binding.btnInitialConfigure.requestFocus()
             }
         }
 
-        dialog.show(supportFragmentManager, SettingsDialogFragment.TAG)
+        try {
+            dialog.showSafely(supportFragmentManager, SettingsDialogFragment.TAG)
+        } catch (e: Exception) {
+            Log.e(TAG, "Не удалось отобразить диалог настроек", e)
+            isSettingsOpen = false
+        }
     }
 
     /**
@@ -224,9 +259,23 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (isSettingsOpen) {
-                    // Окно настроек само перехватит отмену
                     remove()
                     onBackPressedDispatcher.onBackPressed()
+                    return
+                }
+
+                if (!currentConfig.isConfigured) {
+                    // При незаданных настройках: двойное нажатие выходит из приложения, одиночное напоминает
+                    if (System.currentTimeMillis() - backPressedTime < 2000) {
+                        finish()
+                    } else {
+                        backPressedTime = System.currentTimeMillis()
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Нажмите [Назад] еще раз для выхода",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                     return
                 }
 
@@ -252,7 +301,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Перехват дополнительных кнопок пульта ДУ (Menu, Settings, D-Pad Center).
+     * Перехват дополнительных кнопок пульта ДУ (Menu, Settings, D-Pad Center, Enter).
      */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         when (keyCode) {
@@ -261,6 +310,14 @@ class MainActivity : AppCompatActivity() {
                 Log.d(TAG, "Нажата кнопка меню/настроек пульта ДУ")
                 openSettingsDialog()
                 return true
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                if (!currentConfig.isConfigured && !isSettingsOpen) {
+                    openSettingsDialog()
+                    return true
+                }
             }
         }
         return super.onKeyDown(keyCode, event)

@@ -161,32 +161,102 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/tvErrorMessage">
 
-            <Button
+            <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnRetryNow"
                 android:layout_width="0dp"
                 android:layout_height="46dp"
                 android:layout_marginEnd="8dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_btn_focused"
+                app:backgroundTint="@null"
                 android:focusable="true"
                 android:fontFamily="sans-serif-medium"
                 android:text="@string/btn_retry"
                 android:textColor="@color/text_primary"
                 android:textSize="13sp" />
 
-            <Button
+            <androidx.appcompat.widget.AppCompatButton
                 android:id="@+id/btnErrorSettings"
                 android:layout_width="0dp"
                 android:layout_height="46dp"
                 android:layout_marginStart="8dp"
                 android:layout_weight="1"
                 android:background="@drawable/bg_btn_secondary_focused"
+                app:backgroundTint="@null"
                 android:focusable="true"
                 android:fontFamily="sans-serif-medium"
                 android:text="@string/btn_settings"
                 android:textColor="@color/text_primary"
                 android:textSize="13sp" />
         </LinearLayout>
+
+    </com.example.streamclient.ui.view.FocusableConstraintLayout>
+
+    <!-- Оверлей первичной настройки (Первый запуск приложения) -->
+    <com.example.streamclient.ui.view.FocusableConstraintLayout
+        android:id="@+id/unconfiguredOverlay"
+        android:layout_width="480dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_card_dark"
+        android:padding="32dp"
+        android:visibility="gone"
+        tools:visibility="visible">
+
+        <ImageView
+            android:id="@+id/ivWelcomeIcon"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_tv"
+            app:tint="@color/brand_emerald"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <TextView
+            android:id="@+id/tvWelcomeTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:fontFamily="sans-serif-bold"
+            android:text="@string/unconfigured_title"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/ivWelcomeIcon" />
+
+        <TextView
+            android:id="@+id/tvWelcomeMessage"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:gravity="center"
+            android:text="@string/unconfigured_subtitle"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tvWelcomeTitle" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnInitialConfigure"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_btn_focused"
+            app:backgroundTint="@null"
+            android:focusable="true"
+            android:fontFamily="sans-serif-medium"
+            android:paddingStart="28dp"
+            android:paddingEnd="28dp"
+            android:text="@string/btn_configure_server"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tvWelcomeMessage" />
 
     </com.example.streamclient.ui.view.FocusableConstraintLayout>
 
