@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val TAG = "MainActivity"
+private const val SERVER_CONNECT_TIMEOUT_MS = 18_000L // 18 секунд (15–20 сек) контрольный таймаут ответа сервера
 
 /**
  * Главный полноэкранный экран клиентского приложения Android TV / Mobile.
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         get() = currentConfig.isConfigured
 
     private var statusPollingJob: Job? = null
+    private var serverConnectTimeoutJob: Job? = null
     private var isStandbyActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,6 +113,7 @@ class MainActivity : AppCompatActivity() {
                 binding.tvStreamUrl.text = config.toDisplayString()
                 playerController.start(config)
                 startStatusPolling(config.serverHost)
+                startConnectionTimeoutWatchdog()
             }
         }
     }
@@ -129,6 +132,7 @@ class MainActivity : AppCompatActivity() {
         // Кнопка повторной попытки из оверлея ошибки
         binding.btnRetryNow.setOnClickListener {
             playerController.retryNow()
+            startConnectionTimeoutWatchdog()
         }
 
         // Кнопка настроек из оверлея ошибки
@@ -169,6 +173,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             is PlayerState.Playing -> {
+                cancelConnectionTimeoutWatchdog()
                 binding.progressBuffering.visibility = View.GONE
                 binding.errorOverlay.visibility = View.GONE
                 binding.tvStreamUrl.text = state.url
@@ -208,13 +213,14 @@ class MainActivity : AppCompatActivity() {
      * При открытии поток ставится на паузу.
      */
     private fun openSettingsDialog() {
-        if (isSettingsOpen) return
+        if (isSettingsOpen || isFinishing || isDestroyed) return
         val existing = supportFragmentManager.findFragmentByTag(SettingsDialogFragment.TAG)
         if (existing != null && existing.isAdded) {
             isSettingsOpen = true
             return
         }
         isSettingsOpen = true
+        cancelConnectionTimeoutWatchdog()
 
         playerController.pause()
 
@@ -227,6 +233,7 @@ class MainActivity : AppCompatActivity() {
             binding.tvStreamUrl.text = newConfig.toDisplayString()
             playerController.start(newConfig)
             startStatusPolling(newConfig.serverHost)
+            startConnectionTimeoutWatchdog()
         }
         dialog.onDismissCallback = {
             isSettingsOpen = false
@@ -235,6 +242,7 @@ class MainActivity : AppCompatActivity() {
             if (currentConfig.isConfigured) {
                 binding.unconfiguredOverlay.visibility = View.GONE
                 playerController.resume()
+                startConnectionTimeoutWatchdog()
             } else {
                 binding.unconfiguredOverlay.visibility = View.VISIBLE
                 binding.btnInitialConfigure.requestFocus()
@@ -337,6 +345,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        cancelConnectionTimeoutWatchdog()
         statusPollingJob?.cancel()
         statusPollingJob = null
         playerController.release()
@@ -438,6 +447,7 @@ class MainActivity : AppCompatActivity() {
         if (isStandbyActive != standby) {
             isStandbyActive = standby
             if (standby) {
+                cancelConnectionTimeoutWatchdog()
                 Log.i(TAG, "Переход в спящий режим Standby (по расписанию или команде сервера)")
                 binding.standbyOverlay.visibility = View.VISIBLE
                 playerController.setStandby(true)
@@ -450,5 +460,50 @@ class MainActivity : AppCompatActivity() {
         if (!standby) {
             playerController.setAudioEnabled(audioEnabled)
         }
+    }
+
+    /**
+     * Контрольный сторожевой таймер подключения к серверу при запуске (18 секунд).
+     * Если за 15-20 секунд сервер не ответил (поток не перешел в воспроизведение),
+     * автоматически открывается диалоговое окно настроек для корректировки адреса.
+     */
+    private fun startConnectionTimeoutWatchdog() {
+        cancelConnectionTimeoutWatchdog()
+        serverConnectTimeoutJob = lifecycleScope.launch {
+            Log.i(TAG, "Запущен сторожевой таймер подключения к серверу ($SERVER_CONNECT_TIMEOUT_MS мс)")
+            delay(SERVER_CONNECT_TIMEOUT_MS)
+
+            // Если трансляция уже успешно играет (STATE_READY / Playing) — ничего не делаем
+            val currentState = playerController.state.value
+            if (currentState is PlayerState.Playing) {
+                Log.d(TAG, "Сервер успешно отвечает, воспроизведение активно.")
+                return@launch
+            }
+
+            // Если включен режим Standby (по расписанию экран штатно выключен) — не тревожим пользователя
+            if (isStandbyActive) {
+                Log.d(TAG, "Клиент находится в режиме Standby по расписанию.")
+                return@launch
+            }
+
+            // Если окно настроек уже открыто или Activity завершается — пропускаем
+            if (isSettingsOpen || isFinishing || isDestroyed) {
+                return@launch
+            }
+
+            Log.w(TAG, "Сервер не ответил в течение 18 секунд. Автоматическое открытие окна настроек.")
+            Toast.makeText(
+                this@MainActivity,
+                R.string.error_server_timeout,
+                Toast.LENGTH_LONG
+            ).show()
+
+            openSettingsDialog()
+        }
+    }
+
+    private fun cancelConnectionTimeoutWatchdog() {
+        serverConnectTimeoutJob?.cancel()
+        serverConnectTimeoutJob = null
     }
 }

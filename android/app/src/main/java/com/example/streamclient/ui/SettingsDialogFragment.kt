@@ -1,5 +1,6 @@
 package com.example.streamclient.ui
 
+import android.app.Dialog
 import android.content.Context
 import android.content.DialogInterface
 import android.os.Bundle
@@ -46,14 +47,13 @@ class SettingsDialogFragment : DialogFragment() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setStyle(STYLE_NORMAL, R.style.Theme_StreamClient_Dialog)
+        setStyle(STYLE_NO_TITLE, R.style.Theme_StreamClient_Dialog)
         appPreferences = AppPreferences(requireContext())
     }
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val dialog = super.onCreateDialog(savedInstanceState)
         dialog.window?.apply {
-            requestFeature(android.view.Window.FEATURE_NO_TITLE)
             clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
             clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
@@ -93,12 +93,15 @@ class SettingsDialogFragment : DialogFragment() {
         dialog?.setOnKeyListener { _, keyCode, event ->
             if (event.action == KeyEvent.ACTION_DOWN) {
                 val current = dialog?.currentFocus
-                if (current == null) {
-                    focusView(binding.etServerHost)
-                    return@setOnKeyListener true
+                val b = _binding
+                if (b != null) {
+                    if (current == null) {
+                        focusView(b.etServerHost)
+                        return@setOnKeyListener true
+                    }
+                    val handled = handleDpadNavigation(current, keyCode)
+                    if (handled) return@setOnKeyListener true
                 }
-                val handled = handleDpadNavigation(current, keyCode)
-                if (handled) return@setOnKeyListener true
             } else if (event.action == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_BACK) {
                 val isConfigured = (activity as? MainActivity)?.isCurrentConfigConfigured == true
                 if (!isConfigured) {
@@ -120,8 +123,10 @@ class SettingsDialogFragment : DialogFragment() {
         }
 
         // Гарантированный начальный фокус на первом поле
-        binding.root.post {
-            focusView(binding.etServerHost)
+        _binding?.root?.post {
+            _binding?.let { b ->
+                focusView(b.etServerHost)
+            }
         }
     }
 
@@ -129,8 +134,8 @@ class SettingsDialogFragment : DialogFragment() {
         target.isFocusable = true
         target.isFocusableInTouchMode = true
         target.requestFocus()
-        binding.scrollView.post {
-            binding.scrollView.requestChildFocus(target, target)
+        _binding?.scrollView?.post {
+            _binding?.scrollView?.requestChildFocus(target, target)
         }
     }
 
@@ -138,7 +143,7 @@ class SettingsDialogFragment : DialogFragment() {
      * Безопасный показ диалога, защищенный от исключений жизненного цикла FragmentManager.
      */
     fun showSafely(fragmentManager: FragmentManager, tag: String = TAG) {
-        if (fragmentManager.isDestroyed) {
+        if (fragmentManager.isDestroyed || fragmentManager.isStateSaved) {
             return
         }
         val existing = fragmentManager.findFragmentByTag(tag)
@@ -147,7 +152,7 @@ class SettingsDialogFragment : DialogFragment() {
         }
         try {
             show(fragmentManager, tag)
-        } catch (e: IllegalStateException) {
+        } catch (e: Exception) {
             try {
                 val ft = fragmentManager.beginTransaction()
                 if (existing != null) {
@@ -164,40 +169,41 @@ class SettingsDialogFragment : DialogFragment() {
     private fun loadCurrentSettings() {
         viewLifecycleOwner.lifecycleScope.launch {
             val config = appPreferences.getStreamConfig()
-            binding.etServerHost.setText(config.serverHost)
+            val b = _binding ?: return@launch
+            b.etServerHost.setText(config.serverHost)
 
             when (config.streamType) {
                 StreamType.RTSP -> {
-                    binding.rbRtsp.isChecked = true
-                    binding.tvPortLabel.text = getString(R.string.rtsp_port_label)
-                    binding.etPort.setText(config.rtspPort.toString())
+                    b.rbRtsp.isChecked = true
+                    b.tvPortLabel.text = getString(R.string.rtsp_port_label)
+                    b.etPort.setText(config.rtspPort.toString())
                 }
                 StreamType.HLS -> {
-                    binding.rbHls.isChecked = true
-                    binding.tvPortLabel.text = getString(R.string.hls_port_label)
-                    binding.etPort.setText(config.hlsPort.toString())
+                    b.rbHls.isChecked = true
+                    b.tvPortLabel.text = getString(R.string.hls_port_label)
+                    b.etPort.setText(config.hlsPort.toString())
                 }
             }
 
-            binding.etStreamPath.setText(config.streamPath)
+            b.etStreamPath.setText(config.streamPath)
 
             val isInterval = config.scheduleMode == "interval"
             when (config.scheduleMode) {
                 "24/7" -> {
-                    binding.rbSched247.isChecked = true
-                    binding.layoutScheduleInterval.visibility = View.GONE
+                    b.rbSched247.isChecked = true
+                    b.layoutScheduleInterval.visibility = View.GONE
                 }
                 "interval" -> {
-                    binding.rbSchedInterval.isChecked = true
-                    binding.layoutScheduleInterval.visibility = View.VISIBLE
+                    b.rbSchedInterval.isChecked = true
+                    b.layoutScheduleInterval.visibility = View.VISIBLE
                 }
                 else -> {
-                    binding.rbSchedGlobal.isChecked = true
-                    binding.layoutScheduleInterval.visibility = View.GONE
+                    b.rbSchedGlobal.isChecked = true
+                    b.layoutScheduleInterval.visibility = View.GONE
                 }
             }
-            binding.etScheduleStart.setText(config.scheduleStart)
-            binding.etScheduleEnd.setText(config.scheduleEnd)
+            b.etScheduleStart.setText(config.scheduleStart)
+            b.etScheduleEnd.setText(config.scheduleEnd)
             updateDynamicFocusPaths(isInterval)
 
             updatePreview()
@@ -248,14 +254,15 @@ class SettingsDialogFragment : DialogFragment() {
      * Динамическое переключение путей навигации пульта ДУ в зависимости от видимости полей интервала.
      */
     private fun updateDynamicFocusPaths(isIntervalVisible: Boolean) {
+        val b = _binding ?: return
         if (isIntervalVisible) {
-            binding.rbSchedInterval.nextFocusDownId = R.id.etScheduleStart
-            binding.btnCancel.nextFocusUpId = R.id.etScheduleStart
-            binding.btnSaveConnect.nextFocusUpId = R.id.etScheduleEnd
+            b.rbSchedInterval.nextFocusDownId = R.id.etScheduleStart
+            b.btnCancel.nextFocusUpId = R.id.etScheduleStart
+            b.btnSaveConnect.nextFocusUpId = R.id.etScheduleEnd
         } else {
-            binding.rbSchedInterval.nextFocusDownId = R.id.btnCancel
-            binding.btnCancel.nextFocusUpId = R.id.rbSchedInterval
-            binding.btnSaveConnect.nextFocusUpId = R.id.rbSchedInterval
+            b.rbSchedInterval.nextFocusDownId = R.id.btnCancel
+            b.btnCancel.nextFocusUpId = R.id.rbSchedInterval
+            b.btnSaveConnect.nextFocusUpId = R.id.rbSchedInterval
         }
     }
 
@@ -294,8 +301,8 @@ class SettingsDialogFragment : DialogFragment() {
 
             et.setOnFocusChangeListener { v, hasFocus ->
                 if (hasFocus) {
-                    binding.scrollView.post {
-                        binding.scrollView.requestChildFocus(v, v)
+                    _binding?.scrollView?.post {
+                        _binding?.scrollView?.requestChildFocus(v, v)
                     }
                 }
             }
@@ -316,8 +323,8 @@ class SettingsDialogFragment : DialogFragment() {
             item.isFocusableInTouchMode = true
             item.setOnFocusChangeListener { v, hasFocus ->
                 if (hasFocus) {
-                    binding.scrollView.post {
-                        binding.scrollView.requestChildFocus(v, v)
+                    _binding?.scrollView?.post {
+                        _binding?.scrollView?.requestChildFocus(v, v)
                     }
                 }
             }
@@ -337,13 +344,14 @@ class SettingsDialogFragment : DialogFragment() {
      * Гарантирует надежный отклик на всех моделях пультов Android TV.
      */
     private fun handleDpadNavigation(focused: View, keyCode: Int): Boolean {
-        val isInterval = binding.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
+        val b = _binding ?: return false
+        val isInterval = b.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
 
         when (focused.id) {
             R.id.etServerHost -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.rbRtsp)
+                        focusView(b.rbRtsp)
                         return true
                     }
                 }
@@ -352,17 +360,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.rbRtsp -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.etServerHost)
+                        focusView(b.etServerHost)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.rbHls)
+                        focusView(b.rbHls)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        binding.rbRtsp.isChecked = true
+                        b.rbRtsp.isChecked = true
                         return true
                     }
                 }
@@ -371,17 +379,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.rbHls -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbRtsp)
+                        focusView(b.rbRtsp)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.etPort)
+                        focusView(b.etPort)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        binding.rbHls.isChecked = true
+                        b.rbHls.isChecked = true
                         return true
                     }
                 }
@@ -390,17 +398,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.etPort -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbHls)
+                        focusView(b.rbHls)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.rbSchedGlobal)
+                        focusView(b.rbSchedGlobal)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         val et = focused as? EditText
                         if (et == null || et.selectionEnd >= (et.text?.length ?: 0)) {
-                            focusView(binding.etStreamPath)
+                            focusView(b.etStreamPath)
                             return true
                         }
                     }
@@ -410,17 +418,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.etStreamPath -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbHls)
+                        focusView(b.rbHls)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.rbSchedGlobal)
+                        focusView(b.rbSchedGlobal)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                         val et = focused as? EditText
                         if (et == null || et.selectionStart <= 0) {
-                            focusView(binding.etPort)
+                            focusView(b.etPort)
                             return true
                         }
                     }
@@ -430,17 +438,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.rbSchedGlobal -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.etPort)
+                        focusView(b.etPort)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.rbSched247)
+                        focusView(b.rbSched247)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        binding.rbSchedGlobal.isChecked = true
+                        b.rbSchedGlobal.isChecked = true
                         return true
                     }
                 }
@@ -449,17 +457,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.rbSched247 -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbSchedGlobal)
+                        focusView(b.rbSchedGlobal)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.rbSchedInterval)
+                        focusView(b.rbSchedInterval)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        binding.rbSched247.isChecked = true
+                        b.rbSched247.isChecked = true
                         return true
                     }
                 }
@@ -468,21 +476,21 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.rbSchedInterval -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbSched247)
+                        focusView(b.rbSched247)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
                         if (isInterval) {
-                            focusView(binding.etScheduleStart)
+                            focusView(b.etScheduleStart)
                         } else {
-                            focusView(binding.btnCancel)
+                            focusView(b.btnCancel)
                         }
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        binding.rbSchedInterval.isChecked = true
+                        b.rbSchedInterval.isChecked = true
                         return true
                     }
                 }
@@ -491,17 +499,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.etScheduleStart -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbSchedInterval)
+                        focusView(b.rbSchedInterval)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.btnCancel)
+                        focusView(b.btnCancel)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
                         val et = focused as? EditText
                         if (et == null || et.selectionEnd >= (et.text?.length ?: 0)) {
-                            focusView(binding.etScheduleEnd)
+                            focusView(b.etScheduleEnd)
                             return true
                         }
                     }
@@ -511,17 +519,17 @@ class SettingsDialogFragment : DialogFragment() {
             R.id.etScheduleEnd -> {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(binding.rbSchedInterval)
+                        focusView(b.rbSchedInterval)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(binding.btnSaveConnect)
+                        focusView(b.btnSaveConnect)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
                         val et = focused as? EditText
                         if (et == null || et.selectionStart <= 0) {
-                            focusView(binding.etScheduleStart)
+                            focusView(b.etScheduleStart)
                             return true
                         }
                     }
@@ -532,14 +540,14 @@ class SettingsDialogFragment : DialogFragment() {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
                         if (isInterval) {
-                            focusView(binding.etScheduleStart)
+                            focusView(b.etScheduleStart)
                         } else {
-                            focusView(binding.rbSchedInterval)
+                            focusView(b.rbSchedInterval)
                         }
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        focusView(binding.btnSaveConnect)
+                        focusView(b.btnSaveConnect)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
@@ -555,14 +563,14 @@ class SettingsDialogFragment : DialogFragment() {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
                         if (isInterval) {
-                            focusView(binding.etScheduleEnd)
+                            focusView(b.etScheduleEnd)
                         } else {
-                            focusView(binding.rbSchedInterval)
+                            focusView(b.rbSchedInterval)
                         }
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        focusView(binding.btnCancel)
+                        focusView(b.btnCancel)
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,

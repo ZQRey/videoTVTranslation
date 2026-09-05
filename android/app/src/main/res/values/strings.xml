@@ -26,6 +26,7 @@
     <string name="status_error_title">Потеряно соединение с сервером</string>
     <string name="status_reconnecting_format">Повторное подключение через %d сек…</string>
     <string name="error_empty_host">Пожалуйста, укажите корректный IP-адрес сервера</string>
+    <string name="error_server_timeout">Сервер вещания не ответил в течение 18 секунд. Проверьте настройки подключения.</string>
 
     <!-- Подсказки пульта ДУ -->
     <string name="tv_remote_hint">Нажмите [Назад] на пульте ДУ для открытия настроек</string>
