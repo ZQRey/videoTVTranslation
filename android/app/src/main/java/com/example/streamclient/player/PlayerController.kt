@@ -2,11 +2,14 @@ package com.example.streamclient.player
 
 import android.content.Context
 import android.util.Log
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.rtsp.RtspMediaSource
@@ -31,7 +34,7 @@ private const val DEFAULT_RECONNECT_INTERVAL_SEC = 4
  * Реализует:
  * - Принудительный RTSP over TCP (исключение потерь пакетов UDP по Wi-Fi).
  * - Поддержку HLS потоков.
- * - Минимальные буферы воспроизведения для минимизации задержки на ТВ-приставках.
+ * - Стабильный анти-джиттер буфер воспроизведения для исключения заиканий звука на ТВ-приставках.
  * - Отказоустойчивый Reconnect Loop с таймером обратного отсчета.
  */
 class PlayerController(
@@ -48,24 +51,35 @@ class PlayerController(
     private var isManuallyPaused = false
 
     /**
-     * Создание и инициализация экземпляра ExoPlayer с тюнингованным буфером.
+     * Создание и инициализация экземпляра ExoPlayer со стабильным аудиотрактом и анти-джиттер буфером.
      */
     private fun getOrCreatePlayer(): ExoPlayer {
         exoPlayer?.let { return it }
 
-        // Минимизация буферов для живого вещания и экономии памяти ТВ-приставок
+        // Оптимальный буфер для предотвращения опустошения аудиобуфера (AudioTrack underrun) при джиттере Wi-Fi
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 1_000,
-                /* maxBufferMs = */ 3_000,
-                /* bufferForPlaybackMs = */ 500,
-                /* bufferForPlaybackAfterRebufferMs = */ 1_000
+                /* minBufferMs = */ 4_000,
+                /* maxBufferMs = */ 15_000,
+                /* bufferForPlaybackMs = */ 1_500,
+                /* bufferForPlaybackAfterRebufferMs = */ 2_000
             )
             .setPrioritizeTimeOverSizeThresholds(true)
+            .setBackBuffer(0, false)
             .build()
 
-        val player = ExoPlayer.Builder(context)
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+            .build()
+
+        val renderersFactory = DefaultRenderersFactory(context)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+            .setEnableAudioTrackPlaybackParams(true)
+
+        val player = ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(loadControl)
+            .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ true)
             .build()
             .apply {
                 playWhenReady = true
@@ -110,7 +124,7 @@ class PlayerController(
                 // КРИТИЧНО: Принудительный TCP для RTSP потока MediaMTX
                 RtspMediaSource.Factory()
                     .setForceUseRtpTcp(true)
-                    .setTimeoutMs(8_000)
+                    .setTimeoutMs(10_000)
                     .createMediaSource(MediaItem.fromUri(streamUri))
             }
             StreamType.HLS -> {
