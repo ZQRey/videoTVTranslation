@@ -302,9 +302,26 @@ class MainActivity : AppCompatActivity() {
 
         statusPollingJob = lifecycleScope.launch(Dispatchers.IO) {
             val token = appPreferences.getClientToken()
-            val statusUrl = "http://$cleanHost:8000/api/client/status?client_id=$token&token=$token"
+            val osInfo = "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}, ${android.os.Build.MODEL})"
+            val hostname = android.os.Build.DEVICE ?: "AndroidTV"
+
             while (isActive) {
                 try {
+                    val config = currentConfig
+                    val schedMode = config.scheduleMode
+                    val schedStart = config.scheduleStart
+                    val schedEnd = config.scheduleEnd
+                    val schedDays = config.scheduleDays.joinToString(",")
+
+                    val statusUrl = "http://$cleanHost:8000/api/client/status" +
+                        "?client_id=$token&token=$token" +
+                        "&hostname=" + java.net.URLEncoder.encode(hostname, "UTF-8") +
+                        "&os_info=" + java.net.URLEncoder.encode(osInfo, "UTF-8") +
+                        "&schedule_mode=" + java.net.URLEncoder.encode(schedMode, "UTF-8") +
+                        "&schedule_start=" + java.net.URLEncoder.encode(schedStart, "UTF-8") +
+                        "&schedule_end=" + java.net.URLEncoder.encode(schedEnd, "UTF-8") +
+                        "&schedule_days=" + java.net.URLEncoder.encode(schedDays, "UTF-8")
+
                     val url = java.net.URL(statusUrl)
                     val connection = url.openConnection() as java.net.HttpURLConnection
                     connection.connectTimeout = 3000
@@ -317,7 +334,8 @@ class MainActivity : AppCompatActivity() {
                         val streamAllowed = json.optBoolean("stream_allowed", true)
                         val audioEnabled = json.optBoolean("audio_enabled", true)
 
-                        val shouldBeStandby = isStandby || !streamAllowed
+                        val isLocalInWindow = isNowInLocalSchedule(config)
+                        val shouldBeStandby = isStandby || !streamAllowed || !isLocalInWindow
 
                         withContext(Dispatchers.Main) {
                             applyStandbyState(shouldBeStandby, audioEnabled)
@@ -328,6 +346,31 @@ class MainActivity : AppCompatActivity() {
                 }
                 delay(4000)
             }
+        }
+    }
+
+    /**
+     * Локальная проверка активности клиента по расписанию.
+     */
+    private fun isNowInLocalSchedule(config: StreamConfig): Boolean {
+        if (config.scheduleMode == "24/7") return true
+        if (config.scheduleMode == "global") return true
+        // Режим interval
+        val cal = java.util.Calendar.getInstance()
+        val calDay = cal.get(java.util.Calendar.DAY_OF_WEEK)
+        val isoDay = if (calDay == java.util.Calendar.SUNDAY) 7 else calDay - 1
+        if (!config.scheduleDays.contains(isoDay)) return false
+
+        val curMin = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+        val sParts = config.scheduleStart.split(":").mapNotNull { it.toIntOrNull() }
+        val eParts = config.scheduleEnd.split(":").mapNotNull { it.toIntOrNull() }
+        val sMin = if (sParts.size >= 2) sParts[0] * 60 + sParts[1] else 0
+        val eMin = if (eParts.size >= 2) eParts[0] * 60 + eParts[1] else 24 * 60
+
+        return if (sMin <= eMin) {
+            curMin in sMin..eMin
+        } else {
+            curMin >= sMin || curMin <= eMin
         }
     }
 

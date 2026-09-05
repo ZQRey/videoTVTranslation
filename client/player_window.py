@@ -139,7 +139,7 @@ class PlayerWindow(QMainWindow):
         self.overlay_frame = QFrame(self.central_widget)
         self.overlay_frame.setStyleSheet("""
             QFrame {
-                background-color: #090d16;
+                background-color: #000000;
                 border: none;
             }
         """)

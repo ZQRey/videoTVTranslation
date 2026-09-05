@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Завершение работы сервисов медиасервера...")
     await schedule_enforcer.stop()
-    await streamer.stop()
+    await streamer.stop(keep_black_alive=False)
     await scanner.stop()
     await log_broadcaster.stop()
     logger.info("Все сервисы штатно остановлены.")
@@ -731,10 +731,17 @@ async def get_client_public_status(
     client_id: Optional[str] = None,
     token: Optional[str] = None,
     ip: Optional[str] = None,
+    hostname: Optional[str] = None,
+    os_info: Optional[str] = None,
+    schedule_mode: Optional[str] = None,
+    schedule_start: Optional[str] = None,
+    schedule_end: Optional[str] = None,
+    schedule_days: Optional[str] = None,
 ):
     """
     Публичный эндпоинт телеметрии для Android TV и внешних клиентов:
     возвращает текущее состояние вещания, standby и расписания.
+    Принимает параметры расписания клиента и автоматически регистрирует/обновляет клиента.
     """
     client_ip = ip.strip() if (ip and ip.strip()) else (request.client.host if request.client else "127.0.0.1")
     search_token = token or client_id
@@ -745,6 +752,44 @@ async def get_client_public_status(
         found_client = next((c for c in client_manager._clients.values() if getattr(c, "token", None) == search_token), None)
     if not found_client:
         found_client = next((c for c in client_manager._clients.values() if c.ip == client_ip), None)
+
+    days_list = None
+    if schedule_days:
+        try:
+            days_list = [int(x.strip()) for x in schedule_days.split(",") if x.strip().isdigit()]
+        except Exception:
+            pass
+
+    if not found_client and (token or client_id):
+        cid = client_id or token
+        client_data = {
+            "token": token or cid,
+            "hostname": hostname or "Android TV",
+            "os_info": os_info or "Android",
+            "screens": [],
+            "schedule_mode": schedule_mode or "global",
+            "schedule_start": schedule_start or "08:00",
+            "schedule_end": schedule_end or "20:00",
+            "schedule_days": days_list if days_list is not None else [1, 2, 3, 4, 5, 6, 7],
+        }
+        found_client = await client_manager.register_or_update(cid, client_ip, client_data, None)
+    elif found_client:
+        found_client.touch()
+        changed = False
+        if schedule_mode and schedule_mode != found_client.schedule_mode:
+            found_client.schedule_mode = schedule_mode
+            changed = True
+        if schedule_start and schedule_start != found_client.schedule_start:
+            found_client.schedule_start = schedule_start
+            changed = True
+        if schedule_end and schedule_end != found_client.schedule_end:
+            found_client.schedule_end = schedule_end
+            changed = True
+        if days_list is not None and days_list != found_client.schedule_days:
+            found_client.schedule_days = days_list
+            changed = True
+        if changed:
+            client_manager._save_clients()
 
     global_status = schedule_enforcer.get_global_status()
     settings = config_manager.get_settings()
@@ -757,7 +802,7 @@ async def get_client_public_status(
             "token": getattr(found_client, "token", found_client.client_id),
             "custom_name": found_client.custom_name,
             "ip": found_client.ip,
-            "standby": found_client.standby,
+            "standby": found_client.standby or not in_window,
             "audio_enabled": found_client.audio_enabled,
             "stream_allowed": found_client.stream_allowed,
             "schedule_mode": found_client.schedule_mode,

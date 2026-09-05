@@ -63,6 +63,10 @@ class ClientDevice:
         self.schedule_days = schedule_days if schedule_days is not None else [1, 2, 3, 4, 5, 6, 7]
         self.standby_by_schedule = standby_by_schedule
 
+    def touch(self) -> None:
+        """Обновление метки последнего обращения клиента."""
+        self.last_seen = time.time()
+
     @property
     def is_online(self) -> bool:
         """Клиент онлайн, если есть активный websocket и был пинг за последние 20 секунд."""
@@ -259,6 +263,8 @@ class ClientManager:
         except Exception as e:
             logger.error("Ошибка при сохранении clients.json: %s", e)
 
+    _save_clients = _save_persisted_clients
+
     async def register_or_update(
         self,
         client_id: str,
@@ -297,6 +303,14 @@ class ClientManager:
                     client.screens = screens
                 if primary_screen:
                     client.primary_screen = primary_screen
+                if "schedule_mode" in data and data["schedule_mode"]:
+                    client.schedule_mode = str(data["schedule_mode"])
+                if "schedule_start" in data and data["schedule_start"]:
+                    client.schedule_start = str(data["schedule_start"])
+                if "schedule_end" in data and data["schedule_end"]:
+                    client.schedule_end = str(data["schedule_end"])
+                if "schedule_days" in data and data["schedule_days"] is not None:
+                    client.schedule_days = list(data["schedule_days"])
                 client.last_seen = time.time()
                 client.connected_at = time.strftime("%Y-%m-%d %H:%M:%S")
                 if websocket is not None:

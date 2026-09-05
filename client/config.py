@@ -13,9 +13,9 @@ import os
 import socket
 import tempfile
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("desktop_player.config")
 
@@ -30,6 +30,10 @@ class ClientConfig:
     api_port: int = 8000
     client_id: str = ""
     token: str = ""
+    schedule_mode: str = "global"
+    schedule_start: str = "08:00"
+    schedule_end: str = "20:00"
+    schedule_days: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
 
     def __post_init__(self) -> None:
         """Валидация и очистка значений конфигурации."""
@@ -88,6 +92,22 @@ class ClientConfig:
         if not self.token:
             self.token = self.client_id
 
+        if str(self.schedule_mode).lower() not in ("global", "24/7", "interval"):
+            self.schedule_mode = "global"
+
+        if not isinstance(self.schedule_start, str) or ":" not in self.schedule_start:
+            self.schedule_start = "08:00"
+
+        if not isinstance(self.schedule_end, str) or ":" not in self.schedule_end:
+            self.schedule_end = "20:00"
+
+        if not isinstance(self.schedule_days, list) or not self.schedule_days:
+            self.schedule_days = [1, 2, 3, 4, 5, 6, 7]
+        else:
+            self.schedule_days = [int(d) for d in self.schedule_days if str(d).isdigit() and 1 <= int(d) <= 7]
+            if not self.schedule_days:
+                self.schedule_days = [1, 2, 3, 4, 5, 6, 7]
+
     @property
     def rtsp_url(self) -> str:
         """Формирует полный URL-адрес RTSP потока."""
@@ -121,6 +141,9 @@ class ClientConfig:
         """Создание экземпляра из словаря данных."""
         cid = str(data.get("client_id", "")).strip()
         tok = str(data.get("token", "")).strip() or cid
+        days = data.get("schedule_days")
+        if days is None or not isinstance(days, list):
+            days = [1, 2, 3, 4, 5, 6, 7]
         return cls(
             server_host=str(data.get("server_host", "")),
             rtsp_port=data.get("rtsp_port", 8554),
@@ -129,6 +152,10 @@ class ClientConfig:
             api_port=data.get("api_port", 8000),
             client_id=cid or tok,
             token=tok or cid,
+            schedule_mode=str(data.get("schedule_mode", "global")),
+            schedule_start=str(data.get("schedule_start", "08:00")),
+            schedule_end=str(data.get("schedule_end", "20:00")),
+            schedule_days=[int(d) for d in days if str(d).isdigit()],
         )
 
 
@@ -266,10 +293,18 @@ class ConfigManager:
         api_port: int = 8000,
         client_id: Optional[str] = None,
         token: Optional[str] = None,
+        schedule_mode: Optional[str] = None,
+        schedule_start: Optional[str] = None,
+        schedule_end: Optional[str] = None,
+        schedule_days: Optional[List[int]] = None,
     ) -> ClientConfig:
         """Обновляет поля конфигурации и сохраняет файл."""
         effective_cid = client_id or self._current_config.client_id
         effective_tok = token or self._current_config.token or effective_cid
+        effective_mode = schedule_mode if schedule_mode is not None else self._current_config.schedule_mode
+        effective_start = schedule_start if schedule_start is not None else self._current_config.schedule_start
+        effective_end = schedule_end if schedule_end is not None else self._current_config.schedule_end
+        effective_days = schedule_days if schedule_days is not None else self._current_config.schedule_days
         new_config = ClientConfig(
             server_host=server_host,
             rtsp_port=rtsp_port,
@@ -278,6 +313,10 @@ class ConfigManager:
             api_port=api_port,
             client_id=effective_cid,
             token=effective_tok,
+            schedule_mode=effective_mode,
+            schedule_start=effective_start,
+            schedule_end=effective_end,
+            schedule_days=effective_days,
         )
         self.save(new_config)
         return new_config

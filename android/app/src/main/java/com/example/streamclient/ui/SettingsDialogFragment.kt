@@ -87,6 +87,24 @@ class SettingsDialogFragment : DialogFragment() {
             }
 
             binding.etStreamPath.setText(config.streamPath)
+
+            when (config.scheduleMode) {
+                "24/7" -> {
+                    binding.rbSched247.isChecked = true
+                    binding.layoutScheduleInterval.visibility = View.GONE
+                }
+                "interval" -> {
+                    binding.rbSchedInterval.isChecked = true
+                    binding.layoutScheduleInterval.visibility = View.VISIBLE
+                }
+                else -> {
+                    binding.rbSchedGlobal.isChecked = true
+                    binding.layoutScheduleInterval.visibility = View.GONE
+                }
+            }
+            binding.etScheduleStart.setText(config.scheduleStart)
+            binding.etScheduleEnd.setText(config.scheduleEnd)
+
             updatePreview()
 
             // Первоначальный фокус на поле ввода или кнопке сохранения
@@ -113,6 +131,15 @@ class SettingsDialogFragment : DialogFragment() {
                 }
             }
             updatePreview()
+        }
+
+        // Переключение режима расписания
+        binding.rgScheduleMode.setOnCheckedChangeListener { _, checkedId ->
+            if (checkedId == R.id.rbSchedInterval) {
+                binding.layoutScheduleInterval.visibility = View.VISIBLE
+            } else {
+                binding.layoutScheduleInterval.visibility = View.GONE
+            }
         }
 
         // Обновление предпросмотра URL при изменении полей
@@ -158,12 +185,23 @@ class SettingsDialogFragment : DialogFragment() {
         val port = binding.etPort.text?.toString()?.toIntOrNull() ?: if (isRtsp) 8554 else 8888
         val path = binding.etStreamPath.text?.toString()?.trim()?.removePrefix("/").orEmpty().ifEmpty { "live" }
 
+        val schedMode = when (binding.rgScheduleMode.checkedRadioButtonId) {
+            R.id.rbSched247 -> "24/7"
+            R.id.rbSchedInterval -> "interval"
+            else -> "global"
+        }
+        val schedStart = binding.etScheduleStart.text?.toString()?.trim()?.ifEmpty { "08:00" } ?: "08:00"
+        val schedEnd = binding.etScheduleEnd.text?.toString()?.trim()?.ifEmpty { "20:00" } ?: "20:00"
+
         val newConfig = StreamConfig(
             serverHost = host,
             streamType = if (isRtsp) StreamType.RTSP else StreamType.HLS,
             rtspPort = if (isRtsp) port else 8554,
             hlsPort = if (!isRtsp) port else 8888,
-            streamPath = path
+            streamPath = path,
+            scheduleMode = schedMode,
+            scheduleStart = schedStart,
+            scheduleEnd = schedEnd
         )
 
         viewLifecycleOwner.lifecycleScope.launch {

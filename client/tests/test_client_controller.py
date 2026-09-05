@@ -128,6 +128,59 @@ class TestSettingsDialog(unittest.TestCase):
         self.assertIn("укажите адрес сервера", dialog.error_label.text())
         dialog.close()
 
+    def test_dialog_schedule_inputs_and_result(self):
+        dialog = SettingsDialog(
+            current_host="192.168.1.120",
+            current_port=8554,
+            current_path="live",
+            schedule_mode="interval",
+            schedule_start="07:30",
+            schedule_end="18:45",
+            schedule_days=[1, 2, 3, 4, 5],
+        )
+        res = dialog.get_settings()
+        # 1. Распаковка как 3-tuple для обратной совместимости
+        host, port, path = res
+        self.assertEqual(host, "192.168.1.120")
+        self.assertEqual(port, 8554)
+        self.assertEqual(path, "live")
+
+        # 2. Доступ к полям расписания через атрибуты
+        self.assertEqual(res.schedule_mode, "interval")
+        self.assertEqual(res.schedule_start, "07:30")
+        self.assertEqual(res.schedule_end, "18:45")
+        self.assertEqual(res.schedule_days, [1, 2, 3, 4, 5])
+
+        # 3. Переключение на 24/7 скрывает контейнер интервала
+        dialog.radio_24_7.setChecked(True)
+        self.assertTrue(dialog.interval_container.isHidden())
+        res_247 = dialog.get_settings()
+        self.assertEqual(res_247.schedule_mode, "24/7")
+
+        # 4. Переключение обратно на interval показывает контейнер интервала
+        dialog.radio_interval.setChecked(True)
+        self.assertFalse(dialog.interval_container.isHidden())
+
+
+class TestLocalScheduleEvaluation(unittest.TestCase):
+    """Тестирование локального расчета временного окна вещания."""
+
+    def test_local_schedule_logic(self):
+        from app_controller import AppController
+        from datetime import datetime, time
+
+        # Тестируем вспомогательную функцию проверки времени
+        # 1. 24/7 всегда активен
+        self.assertTrue(AppController._is_time_in_range(time(3, 0), "08:00", "20:00") is False)
+        self.assertTrue(AppController._is_time_in_range(time(12, 0), "08:00", "20:00") is True)
+        self.assertTrue(AppController._is_time_in_range(time(20, 0), "08:00", "20:00") is True)
+        self.assertTrue(AppController._is_time_in_range(time(20, 1), "08:00", "20:00") is False)
+
+        # 2. Ночной интервал (22:00 - 06:00)
+        self.assertTrue(AppController._is_time_in_range(time(23, 0), "22:00", "06:00") is True)
+        self.assertTrue(AppController._is_time_in_range(time(2, 0), "22:00", "06:00") is True)
+        self.assertTrue(AppController._is_time_in_range(time(12, 0), "22:00", "06:00") is False)
+
 
 class TestAudioMuteLogic(unittest.TestCase):
     """Тестирование логики маршрутизации аудио с учетом флага audio_allowed."""

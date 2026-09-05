@@ -29,6 +29,10 @@ class AppPreferences(private val context: Context) {
         private val KEY_HLS_PORT = intPreferencesKey("hls_port")
         private val KEY_STREAM_PATH = stringPreferencesKey("stream_path")
         private val KEY_CLIENT_TOKEN = stringPreferencesKey("client_token")
+        private val KEY_SCHEDULE_MODE = stringPreferencesKey("schedule_mode")
+        private val KEY_SCHEDULE_START = stringPreferencesKey("schedule_start")
+        private val KEY_SCHEDULE_END = stringPreferencesKey("schedule_end")
+        private val KEY_SCHEDULE_DAYS = stringPreferencesKey("schedule_days")
     }
 
     /**
@@ -63,13 +67,24 @@ class AppPreferences(private val context: Context) {
             val rtspPort = prefs[KEY_RTSP_PORT] ?: 8554
             val hlsPort = prefs[KEY_HLS_PORT] ?: 8888
             val path = prefs[KEY_STREAM_PATH] ?: "live"
+            val schedMode = prefs[KEY_SCHEDULE_MODE] ?: "global"
+            val schedStart = prefs[KEY_SCHEDULE_START] ?: "08:00"
+            val schedEnd = prefs[KEY_SCHEDULE_END] ?: "20:00"
+            val schedDaysRaw = prefs[KEY_SCHEDULE_DAYS] ?: "1,2,3,4,5,6,7"
+            val schedDays = schedDaysRaw.split(",")
+                .mapNotNull { it.trim().toIntOrNull() }
+                .ifEmpty { listOf(1, 2, 3, 4, 5, 6, 7) }
 
             StreamConfig(
                 serverHost = host,
                 streamType = streamType,
                 rtspPort = rtspPort,
                 hlsPort = hlsPort,
-                streamPath = path
+                streamPath = path,
+                scheduleMode = schedMode,
+                scheduleStart = schedStart,
+                scheduleEnd = schedEnd,
+                scheduleDays = schedDays
             )
         }
 
@@ -90,6 +105,10 @@ class AppPreferences(private val context: Context) {
             prefs[KEY_RTSP_PORT] = config.rtspPort
             prefs[KEY_HLS_PORT] = config.hlsPort
             prefs[KEY_STREAM_PATH] = config.streamPath.trim()
+            prefs[KEY_SCHEDULE_MODE] = config.scheduleMode
+            prefs[KEY_SCHEDULE_START] = config.scheduleStart
+            prefs[KEY_SCHEDULE_END] = config.scheduleEnd
+            prefs[KEY_SCHEDULE_DAYS] = config.scheduleDays.joinToString(",")
         }
     }
 

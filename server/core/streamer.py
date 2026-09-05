@@ -43,6 +43,8 @@ class StreamOrchestrator:
         self.consecutive_errors: int = 0
         self.current_process: Optional[asyncio.subprocess.Process] = None
         self.current_file: Optional[Path] = None
+        self._black_process: Optional[asyncio.subprocess.Process] = None
+        self._black_image_path: Path = Path(__file__).resolve().parent.parent / "config" / "black.png"
 
         self._skip_requested: bool = False
         self._manual_switch_requested: bool = False
@@ -57,8 +59,8 @@ class StreamOrchestrator:
             self._main_task = asyncio.create_task(self._streaming_loop())
             logger.info("Оркестратор вещания успешно запущен.")
 
-    async def stop(self) -> None:
-        """Полная остановка вещания."""
+    async def stop(self, keep_black_alive: bool = False) -> None:
+        """Полная остановка вещания (или перевод в режим вещания чёрного экрана)."""
         self._is_running = False
         self._resume_event.set()
         await self._terminate_current_process()
@@ -70,7 +72,12 @@ class StreamOrchestrator:
                 pass
             self._main_task = None
         self.status = StreamStatus.IDLE
-        logger.info("Оркестратор вещания остановлен.")
+        if keep_black_alive:
+            await self._start_black_stream()
+            logger.info("Оркестратор вещания остановлен (активна трансляция чёрного экрана).")
+        else:
+            await self._stop_black_stream()
+            logger.info("Оркестратор вещания остановлен.")
 
     async def skip_track(self) -> bool:
         """Принудительный пропуск текущего трека."""
@@ -262,6 +269,98 @@ class StreamOrchestrator:
                 logger.debug(f"Исключение при остановке FFmpeg процесса: {e}")
         self.current_process = None
 
+    def _ensure_black_image(self) -> Path:
+        """Гарантирует физическое существование эталонного черного изображения black.png."""
+        if self._black_image_path.exists():
+            return self._black_image_path
+
+        self._black_image_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            import struct
+            import zlib
+            width, height = 1920, 1080
+            raw_data = b"".join(b"\x00" + b"\x00" * width for _ in range(height))
+            compressed = zlib.compress(raw_data, 9)
+
+            def chunk(chunk_type, data):
+                crc = zlib.crc32(chunk_type + data) & 0xFFFFFFFF
+                return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", crc)
+
+            png = b"\x89PNG\r\n\x1a\n"
+            png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            png += chunk(b"IDAT", compressed)
+            png += chunk(b"IEND", b"")
+
+            with open(self._black_image_path, "wb") as f:
+                f.write(png)
+            logger.info("Сгенерировано эталонное чёрное изображение 1920x1080: %s", self._black_image_path)
+        except Exception as e:
+            logger.warning("Не удалось автоматически сгенерировать black.png: %s", e)
+        return self._black_image_path
+
+    async def _start_black_stream(self) -> None:
+        """
+        Запуск процесса трансляции полностью чёрного изображения (рисунка) с тишиной.
+        Позволяет поддерживать активный RTSP-поток на MediaMTX при отсутствии видеофайлов,
+        паузе или окончании эфира, предотвращая появление ошибки 'Подключение к серверу' на клиентах.
+        """
+        if self._black_process and self._black_process.returncode is None:
+            return
+
+        black_img = self._ensure_black_image()
+        settings = self.config_manager.get_settings()
+        target_url = settings.rtsp_target_url
+
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-re",
+            "-loop", "1",
+            "-i", str(black_img.resolve()),
+            "-f", "lavfi",
+            "-i", "anullsrc=r=44100:cl=stereo",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-g", "50",
+            "-keyint_min", "25",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "64k",
+            "-ar", "44100",
+            "-f", "rtsp",
+            "-rtsp_transport", "tcp",
+            target_url,
+        ]
+
+        try:
+            self._black_process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            logger.info("Запущена фоновая трансляция чёрного изображения (black.png) в RTSP.")
+            asyncio.create_task(self._log_process_stderr(self._black_process, "black_screen"))
+        except Exception as e:
+            logger.debug("Не удалось запустить трансляцию чёрного экрана FFmpeg: %s", e)
+            self._black_process = None
+
+    async def _stop_black_stream(self) -> None:
+        """Остановка трансляции чёрного изображения перед стартом видеофайла."""
+        proc = self._black_process
+        if proc and proc.returncode is None:
+            try:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+            except Exception:
+                pass
+        self._black_process = None
+
     async def _log_process_stderr(
         self, proc: asyncio.subprocess.Process, track_name: str
     ) -> None:
@@ -288,6 +387,7 @@ class StreamOrchestrator:
                 logger.critical(
                     "Вещание заблокировано предохранителем! Ожидание ручного сброса через веб-панель..."
                 )
+                await self._start_black_stream()
                 await self._resume_event.wait()
                 if not self._is_running:
                     break
@@ -298,9 +398,18 @@ class StreamOrchestrator:
             if not target_file:
                 self.status = StreamStatus.IDLE
                 self.current_file = None
-                # Очередь пуста — ждем появления файлов
-                await asyncio.sleep(2.0)
+                # Очередь пуста или вещание не начато — транслируем полностью чёрное изображение (рисунок)
+                await self._start_black_stream()
+                # Ждем появления файлов или вызова play_track
+                try:
+                    await asyncio.wait_for(self._resume_event.wait(), timeout=2.0)
+                    self._resume_event.clear()
+                except asyncio.TimeoutError:
+                    pass
                 continue
+
+            # Файл найден — завершаем трансляцию черного экрана перед началом видео
+            await self._stop_black_stream()
 
             # Проверяем физическое наличие файла перед запуском
             if not target_file.exists():

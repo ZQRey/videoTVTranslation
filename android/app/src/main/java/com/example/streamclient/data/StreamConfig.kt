@@ -18,7 +18,11 @@ data class StreamConfig(
     val streamType: StreamType = StreamType.RTSP,
     val rtspPort: Int = 8554,
     val hlsPort: Int = 8888,
-    val streamPath: String = "live"
+    val streamPath: String = "live",
+    val scheduleMode: String = "global",
+    val scheduleStart: String = "08:00",
+    val scheduleEnd: String = "20:00",
+    val scheduleDays: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7)
 ) {
     /**
      * Проверка, задан ли адрес сервера.

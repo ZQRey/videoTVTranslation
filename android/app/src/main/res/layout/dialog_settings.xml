@@ -204,6 +204,148 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- 4. Расписание вещания клиента -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="14dp"
+            android:background="@color/bg_card_stroke" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif-medium"
+            android:text="@string/schedule_title"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
+
+        <RadioGroup
+            android:id="@+id/rgScheduleMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/rbSchedGlobal"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_radio_focused"
+                android:buttonTint="@color/brand_emerald"
+                android:checked="true"
+                android:focusable="true"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="@string/schedule_mode_global"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <RadioButton
+                android:id="@+id/rbSched247"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:layout_marginBottom="4dp"
+                android:background="@drawable/bg_radio_focused"
+                android:buttonTint="@color/brand_emerald"
+                android:focusable="true"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="@string/schedule_mode_24_7"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <RadioButton
+                android:id="@+id/rbSchedInterval"
+                android:layout_width="match_parent"
+                android:layout_height="40dp"
+                android:background="@drawable/bg_radio_focused"
+                android:buttonTint="@color/brand_emerald"
+                android:focusable="true"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="@string/schedule_mode_interval"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+        </RadioGroup>
+
+        <LinearLayout
+            android:id="@+id/layoutScheduleInterval"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/schedule_start_label"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/etScheduleStart"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="4dp"
+                    android:background="@drawable/bg_input_focused"
+                    android:focusable="true"
+                    android:fontFamily="monospace"
+                    android:hint="08:00"
+                    android:inputType="time"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:singleLine="true"
+                    android:text="08:00"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/schedule_end_label"
+                    android:textColor="@color/text_primary"
+                    android:textSize="12sp" />
+
+                <EditText
+                    android:id="@+id/etScheduleEnd"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="4dp"
+                    android:background="@drawable/bg_input_focused"
+                    android:focusable="true"
+                    android:fontFamily="monospace"
+                    android:hint="20:00"
+                    android:inputType="time"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:singleLine="true"
+                    android:text="20:00"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+
         <!-- Подсказка результирующего URL -->
         <TextView
             android:id="@+id/tvResultPreview"

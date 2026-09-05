@@ -15,6 +15,7 @@ import socket
 import subprocess
 import sys
 import uuid
+from datetime import datetime, time as dt_time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -129,6 +130,7 @@ class AppController(QObject):
         self.server_audio_enabled: bool = True
         self.stream_allowed: bool = True
         self.is_standby: bool = False
+        self._standby_by_local_schedule: bool = False
         self.client_id = self.config.client_id
 
         # Установка глобального перехватчика горячих клавиш 'Q' (настройки) и 'E' (выход)
@@ -147,6 +149,12 @@ class AppController(QObject):
         self._ws_heartbeat_timer = QTimer(self)
         self._ws_heartbeat_timer.setInterval(5000)
         self._ws_heartbeat_timer.timeout.connect(self._send_heartbeat)
+
+        # Таймер локального контроля персонального расписания
+        self._local_schedule_timer = QTimer(self)
+        self._local_schedule_timer.setInterval(3000)
+        self._local_schedule_timer.timeout.connect(self._check_local_schedule)
+        self._local_schedule_timer.start()
 
         # Таймер Heartbeat для гарантированной обработки SIGINT (Ctrl+C) в Python/Qt
         self._sigint_timer = QTimer(self)
@@ -299,6 +307,10 @@ class AppController(QObject):
             "audio_enabled": self.server_audio_enabled,
             "stream_allowed": self.stream_allowed,
             "standby": self.is_standby,
+            "schedule_mode": getattr(self.config, "schedule_mode", "global"),
+            "schedule_start": getattr(self.config, "schedule_start", "08:00"),
+            "schedule_end": getattr(self.config, "schedule_end", "20:00"),
+            "schedule_days": getattr(self.config, "schedule_days", [1, 2, 3, 4, 5, 6, 7]),
         }
         self._ws.sendTextMessage(json.dumps(reg_data, ensure_ascii=False))
         self._ws_heartbeat_timer.start()
@@ -324,6 +336,10 @@ class AppController(QObject):
                 "audio_enabled": self.server_audio_enabled,
                 "stream_allowed": self.stream_allowed,
                 "standby": self.is_standby,
+                "schedule_mode": getattr(self.config, "schedule_mode", "global"),
+                "schedule_start": getattr(self.config, "schedule_start", "08:00"),
+                "schedule_end": getattr(self.config, "schedule_end", "20:00"),
+                "schedule_days": getattr(self.config, "schedule_days", [1, 2, 3, 4, 5, 6, 7]),
             }
             self._ws.sendTextMessage(json.dumps(hb_data))
 
@@ -438,6 +454,10 @@ class AppController(QObject):
             current_host=self.config.server_host,
             current_port=self.config.rtsp_port,
             current_path=self.config.stream_path,
+            current_schedule_mode=getattr(self.config, "schedule_mode", "global"),
+            current_schedule_start=getattr(self.config, "schedule_start", "08:00"),
+            current_schedule_end=getattr(self.config, "schedule_end", "20:00"),
+            current_schedule_days=getattr(self.config, "schedule_days", [1, 2, 3, 4, 5, 6, 7]),
             parent=parent_window
         )
 
@@ -455,17 +475,29 @@ class AppController(QObject):
         result = self._settings_dialog.exec()
 
         if result == SettingsDialog.DialogCode.Accepted:
-            host, port, path = self._settings_dialog.get_settings()
-            logger.info("Настройки сохранены пользователем: %s:%d/%s", host, port, path)
+            settings = self._settings_dialog.get_settings()
+            host, port, path = settings.host, settings.port, settings.path
+            logger.info("Настройки сохранены пользователем: %s:%d/%s (режим расписания: %s)", host, port, path, settings.schedule_mode)
 
             # Обновление и запись конфигурации
             self.config_manager.update(
                 server_host=host,
                 rtsp_port=port,
                 stream_path=path,
-                network_caching=self.config.network_caching
+                network_caching=self.config.network_caching,
+                schedule_mode=settings.schedule_mode,
+                schedule_start=settings.schedule_start,
+                schedule_end=settings.schedule_end,
+                schedule_days=settings.schedule_days,
             )
             new_url = self.config.rtsp_url
+
+            # Отправка обновленных данных на сервер по WS
+            if self._ws and self._ws.isValid():
+                self._send_heartbeat()
+
+            # Немедленная проверка локального расписания
+            self._check_local_schedule()
 
             if new_url == old_url:
                 logger.info("URL потока не изменился (%s). Возобновление текущего воспроизведения без перезапуска VLC.", new_url)
@@ -483,6 +515,51 @@ class AppController(QObject):
 
         self._settings_dialog = None
         self._is_settings_open = False
+
+    @staticmethod
+    def _is_time_in_range(cur_t: dt_time, start_str: str, end_str: str) -> bool:
+        """Проверка попадания времени cur_t в интервал start_str - end_str."""
+        try:
+            sh, sm = map(int, start_str.split(":", 1))
+            eh, em = map(int, end_str.split(":", 1))
+            start_t = dt_time(sh, sm)
+            end_t = dt_time(eh, em)
+            if start_t <= end_t:
+                return start_t <= cur_t <= end_t
+            else:
+                return cur_t >= start_t or cur_t <= end_t
+        except Exception:
+            return True
+
+    def _check_local_schedule(self) -> None:
+        """Периодическая проверка автономного локального расписания клиента."""
+        mode = getattr(self.config, "schedule_mode", "global")
+        if mode != "interval":
+            if self._standby_by_local_schedule and self.is_standby:
+                self._standby_by_local_schedule = False
+                self.set_standby(False)
+            return
+
+        now = datetime.now()
+        weekday = now.isoweekday()
+        days = getattr(self.config, "schedule_days", [1, 2, 3, 4, 5, 6, 7]) or [1, 2, 3, 4, 5, 6, 7]
+        if weekday not in days:
+            in_window = False
+        else:
+            start_str = getattr(self.config, "schedule_start", "08:00")
+            end_str = getattr(self.config, "schedule_end", "20:00")
+            in_window = self._is_time_in_range(now.time(), start_str, end_str)
+
+        if not in_window:
+            if not self.is_standby:
+                self._standby_by_local_schedule = True
+                logger.info("🌙 Локальное расписание клиента: экран переведен в режим Standby (чёрный экран).")
+                self.set_standby(True)
+        else:
+            if self.is_standby and self._standby_by_local_schedule:
+                self._standby_by_local_schedule = False
+                logger.info("☀️ Локальное расписание клиента: эфир возобновлен.")
+                self.set_standby(False)
 
     # --- Завершение работы ---
 

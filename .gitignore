@@ -94,6 +94,10 @@ server/config/clients.json
 server/auto.crt
 server/auto.key
 
+# Client runtime state
+client/client_token.txt
+client/client_config.json
+
 # Custom plugins keep
 !server/plugins_custom/.gitkeep
 

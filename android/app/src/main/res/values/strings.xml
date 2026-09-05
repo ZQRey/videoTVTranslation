@@ -29,4 +29,13 @@
 
     <!-- Подсказки пульта ДУ -->
     <string name="tv_remote_hint">Нажмите [Назад] на пульте ДУ для открытия настроек</string>
+
+    <!-- Расписание клиента -->
+    <string name="schedule_title">Расписание вещания клиента</string>
+    <string name="schedule_mode_label">Режим работы:</string>
+    <string name="schedule_mode_global">По серверному расписанию (по умолч.)</string>
+    <string name="schedule_mode_24_7">Круглосуточно (24/7)</string>
+    <string name="schedule_mode_interval">Свой интервал времени</string>
+    <string name="schedule_start_label">Время начала:</string>
+    <string name="schedule_end_label">Время конца:</string>
 </resources>
