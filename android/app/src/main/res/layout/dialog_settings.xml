@@ -9,14 +9,12 @@
     android:overScrollMode="never"
     android:fillViewport="true"
     android:focusable="false"
-    android:descendantFocusability="afterDescendants"
     android:padding="28dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:focusable="false"
-        android:descendantFocusability="afterDescendants"
         android:orientation="vertical">
 
         <!-- Шапка диалога -->

@@ -89,20 +89,11 @@ class SettingsDialogFragment : DialogFragment() {
             clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         }
 
-        // Перехват кнопок пульта ДУ на уровне окна диалога
+        // Перехват кнопок на уровне окна диалога:
+        // 1. Двойное нажатие [Назад] для выхода из приложения, если настройки еще не сохранены.
+        // 2. Страховочный фокус: если при нажатии кнопки пульта фокус потерян вообще во всем окне.
         dialog?.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN) {
-                val current = dialog?.currentFocus
-                val b = _binding
-                if (b != null) {
-                    if (current == null) {
-                        focusView(b.etServerHost)
-                        return@setOnKeyListener true
-                    }
-                    val handled = handleDpadNavigation(current, keyCode)
-                    if (handled) return@setOnKeyListener true
-                }
-            } else if (event.action == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.action == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_BACK) {
                 val isConfigured = (activity as? MainActivity)?.isCurrentConfigConfigured == true
                 if (!isConfigured) {
                     val now = System.currentTimeMillis()
@@ -118,24 +109,37 @@ class SettingsDialogFragment : DialogFragment() {
                     }
                     return@setOnKeyListener true
                 }
+            } else if (event.action == KeyEvent.ACTION_DOWN) {
+                // Если ни один элемент в диалоге сейчас не имеет фокуса — даем фокус первому полю
+                val root = _binding?.root
+                if (root != null && root.findFocus() == null) {
+                    _binding?.let { b -> focusAndScrollTo(b.etServerHost) }
+                    return@setOnKeyListener true
+                }
             }
             false
         }
 
-        // Гарантированный начальный фокус на первом поле
+        // Первоначальный фокус на первом поле ввода
         _binding?.root?.post {
             _binding?.let { b ->
-                focusView(b.etServerHost)
+                focusAndScrollTo(b.etServerHost)
             }
         }
     }
 
-    private fun focusView(target: View) {
+    private fun focusAndScrollTo(target: View) {
         target.isFocusable = true
         target.isFocusableInTouchMode = true
         target.requestFocus()
-        _binding?.scrollView?.post {
-            _binding?.scrollView?.requestChildFocus(target, target)
+        val scroll = _binding?.scrollView ?: return
+        scroll.post {
+            val rect = android.graphics.Rect()
+            target.getDrawingRect(rect)
+            scroll.offsetDescendantRectToMyCoords(target, rect)
+            rect.top = (rect.top - 32).coerceAtLeast(0)
+            rect.bottom += 32
+            scroll.requestChildRectangleOnScreen(target, rect, false)
         }
     }
 
@@ -268,321 +272,360 @@ class SettingsDialogFragment : DialogFragment() {
 
     /**
      * Комплексная настройка навигации стрелками пульта ДУ (D-Pad) для всех элементов управления.
+     * Обеспечивает прямое перемещение фокуса между элементами и скролл без взаимных блокировок.
      */
     private fun setupDpadNavigation() {
-        val editTexts = listOf(
-            binding.etServerHost,
-            binding.etPort,
-            binding.etStreamPath,
-            binding.etScheduleStart,
-            binding.etScheduleEnd
-        )
+        val b = _binding ?: return
 
-        for (et in editTexts) {
-            et.isFocusable = true
-            et.isFocusableInTouchMode = true
-            et.setOnKeyListener { v, keyCode, event ->
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    when (keyCode) {
-                        KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_DPAD_CENTER,
-                        KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                            val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-                            imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
-                            return@setOnKeyListener true
-                        }
-                    }
-                    if (handleDpadNavigation(v, keyCode)) {
-                        return@setOnKeyListener true
-                    }
-                }
-                false
-            }
-
-            et.setOnFocusChangeListener { v, hasFocus ->
-                if (hasFocus) {
-                    _binding?.scrollView?.post {
-                        _binding?.scrollView?.requestChildFocus(v, v)
-                    }
-                }
-            }
-        }
-
-        val otherFocusables = listOf(
-            binding.rbRtsp,
-            binding.rbHls,
-            binding.rbSchedGlobal,
-            binding.rbSched247,
-            binding.rbSchedInterval,
-            binding.btnCancel,
-            binding.btnSaveConnect
-        )
-
-        for (item in otherFocusables) {
-            item.isFocusable = true
-            item.isFocusableInTouchMode = true
-            item.setOnFocusChangeListener { v, hasFocus ->
-                if (hasFocus) {
-                    _binding?.scrollView?.post {
-                        _binding?.scrollView?.requestChildFocus(v, v)
-                    }
-                }
-            }
-            item.setOnKeyListener { v, keyCode, event ->
-                if (event.action == KeyEvent.ACTION_DOWN) {
-                    if (handleDpadNavigation(v, keyCode)) {
-                        return@setOnKeyListener true
-                    }
-                }
-                false
-            }
-        }
-    }
-
-    /**
-     * Прямой детерминированный обработчик перемещения фокуса пульта ДУ (D-Pad).
-     * Гарантирует надежный отклик на всех моделях пультов Android TV.
-     */
-    private fun handleDpadNavigation(focused: View, keyCode: Int): Boolean {
-        val b = _binding ?: return false
-        val isInterval = b.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
-
-        when (focused.id) {
-            R.id.etServerHost -> {
+        // 1. Поле ввода хоста сервера
+        setupFocusAndScroll(b.etServerHost)
+        b.etServerHost.setOnKeyListener { v, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.rbRtsp)
-                        return true
+                        focusAndScrollTo(b.rbRtsp)
+                        return@setOnKeyListener true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.rbRtsp -> {
+        // 2. Радиокнопка RTSP
+        setupFocusAndScroll(b.rbRtsp)
+        b.rbRtsp.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.etServerHost)
-                        return true
+                        focusAndScrollTo(b.etServerHost)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.rbHls)
-                        return true
+                        focusAndScrollTo(b.rbHls)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                         b.rbRtsp.isChecked = true
-                        return true
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.rbHls -> {
+        // 3. Радиокнопка HLS
+        setupFocusAndScroll(b.rbHls)
+        b.rbHls.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbRtsp)
-                        return true
+                        focusAndScrollTo(b.rbRtsp)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.etPort)
-                        return true
+                        focusAndScrollTo(b.etPort)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                         b.rbHls.isChecked = true
-                        return true
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.etPort -> {
+        // 4. Поле порта
+        setupFocusAndScroll(b.etPort)
+        b.etPort.setOnKeyListener { v, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbHls)
-                        return true
+                        focusAndScrollTo(b.rbHls)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.rbSchedGlobal)
-                        return true
+                        focusAndScrollTo(b.rbSchedGlobal)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        val et = focused as? EditText
+                        val et = v as? EditText
                         if (et == null || et.selectionEnd >= (et.text?.length ?: 0)) {
-                            focusView(b.etStreamPath)
-                            return true
+                            focusAndScrollTo(b.etStreamPath)
+                            return@setOnKeyListener true
                         }
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.etStreamPath -> {
+        // 5. Поле пути потока
+        setupFocusAndScroll(b.etStreamPath)
+        b.etStreamPath.setOnKeyListener { v, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbHls)
-                        return true
+                        focusAndScrollTo(b.rbHls)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.rbSchedGlobal)
-                        return true
+                        focusAndScrollTo(b.rbSchedGlobal)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        val et = focused as? EditText
+                        val et = v as? EditText
                         if (et == null || et.selectionStart <= 0) {
-                            focusView(b.etPort)
-                            return true
+                            focusAndScrollTo(b.etPort)
+                            return@setOnKeyListener true
                         }
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.rbSchedGlobal -> {
+        // 6. Режим расписания: Серверное (по умолчанию)
+        setupFocusAndScroll(b.rbSchedGlobal)
+        b.rbSchedGlobal.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.etPort)
-                        return true
+                        focusAndScrollTo(b.etPort)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.rbSched247)
-                        return true
+                        focusAndScrollTo(b.rbSched247)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                         b.rbSchedGlobal.isChecked = true
-                        return true
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.rbSched247 -> {
+        // 7. Режим расписания: 24/7
+        setupFocusAndScroll(b.rbSched247)
+        b.rbSched247.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbSchedGlobal)
-                        return true
+                        focusAndScrollTo(b.rbSchedGlobal)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.rbSchedInterval)
-                        return true
+                        focusAndScrollTo(b.rbSchedInterval)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                         b.rbSched247.isChecked = true
-                        return true
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.rbSchedInterval -> {
+        // 8. Режим расписания: Интервал
+        setupFocusAndScroll(b.rbSchedInterval)
+        b.rbSchedInterval.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbSched247)
-                        return true
+                        focusAndScrollTo(b.rbSched247)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        val isInterval = b.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
                         if (isInterval) {
-                            focusView(b.etScheduleStart)
+                            focusAndScrollTo(b.etScheduleStart)
                         } else {
-                            focusView(b.btnCancel)
+                            focusAndScrollTo(b.btnCancel)
                         }
-                        return true
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                         b.rbSchedInterval.isChecked = true
-                        return true
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.etScheduleStart -> {
+        // 9. Время начала интервала
+        setupFocusAndScroll(b.etScheduleStart)
+        b.etScheduleStart.setOnKeyListener { v, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbSchedInterval)
-                        return true
+                        focusAndScrollTo(b.rbSchedInterval)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.btnCancel)
-                        return true
+                        focusAndScrollTo(b.btnCancel)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        val et = focused as? EditText
+                        val et = v as? EditText
                         if (et == null || et.selectionEnd >= (et.text?.length ?: 0)) {
-                            focusView(b.etScheduleEnd)
-                            return true
+                            focusAndScrollTo(b.etScheduleEnd)
+                            return@setOnKeyListener true
                         }
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.etScheduleEnd -> {
+        // 10. Время окончания интервала
+        setupFocusAndScroll(b.etScheduleEnd)
+        b.etScheduleEnd.setOnKeyListener { v, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        focusView(b.rbSchedInterval)
-                        return true
+                        focusAndScrollTo(b.rbSchedInterval)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusView(b.btnSaveConnect)
-                        return true
+                        focusAndScrollTo(b.btnSaveConnect)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        val et = focused as? EditText
+                        val et = v as? EditText
                         if (et == null || et.selectionStart <= 0) {
-                            focusView(b.etScheduleStart)
-                            return true
+                            focusAndScrollTo(b.etScheduleStart)
+                            return@setOnKeyListener true
                         }
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                        imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.btnCancel -> {
+        // 11. Кнопка Отмена
+        setupFocusAndScroll(b.btnCancel)
+        b.btnCancel.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
+                        val isInterval = b.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
                         if (isInterval) {
-                            focusView(b.etScheduleStart)
+                            focusAndScrollTo(b.etScheduleStart)
                         } else {
-                            focusView(b.rbSchedInterval)
+                            focusAndScrollTo(b.rbSchedInterval)
                         }
-                        return true
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        focusView(b.btnSaveConnect)
-                        return true
+                        focusAndScrollTo(b.btnSaveConnect)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        dismiss()
-                        return true
+                        b.btnCancel.performClick()
+                        return@setOnKeyListener true
                     }
                 }
             }
+            false
+        }
 
-            R.id.btnSaveConnect -> {
+        // 12. Кнопка Сохранить и подключиться
+        setupFocusAndScroll(b.btnSaveConnect)
+        b.btnSaveConnect.setOnKeyListener { _, keyCode, event ->
+            if (event.action == KeyEvent.ACTION_DOWN) {
                 when (keyCode) {
                     KeyEvent.KEYCODE_DPAD_UP -> {
+                        val isInterval = b.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
                         if (isInterval) {
-                            focusView(b.etScheduleEnd)
+                            focusAndScrollTo(b.etScheduleEnd)
                         } else {
-                            focusView(b.rbSchedInterval)
+                            focusAndScrollTo(b.rbSchedInterval)
                         }
-                        return true
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        focusView(b.btnCancel)
-                        return true
+                        focusAndScrollTo(b.btnCancel)
+                        return@setOnKeyListener true
                     }
                     KeyEvent.KEYCODE_DPAD_CENTER,
                     KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        saveAndConnect()
-                        return true
+                        b.btnSaveConnect.performClick()
+                        return@setOnKeyListener true
                     }
+                }
+            }
+            false
+        }
+    }
+
+    private fun setupFocusAndScroll(view: View) {
+        view.isFocusable = true
+        view.isFocusableInTouchMode = true
+        view.setOnFocusChangeListener { v, hasFocus ->
+            if (hasFocus) {
+                val scroll = _binding?.scrollView ?: return@setOnFocusChangeListener
+                scroll.post {
+                    val rect = android.graphics.Rect()
+                    v.getDrawingRect(rect)
+                    scroll.offsetDescendantRectToMyCoords(v, rect)
+                    rect.top = (rect.top - 32).coerceAtLeast(0)
+                    rect.bottom += 32
+                    scroll.requestChildRectangleOnScreen(v, rect, false)
                 }
             }
         }
-        return false
     }
 
     private fun updatePreview() {
