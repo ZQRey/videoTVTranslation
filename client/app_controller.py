@@ -291,6 +291,7 @@ class AppController(QObject):
         reg_data = {
             "type": "register",
             "client_id": self.client_id,
+            "token": getattr(self.config, "token", self.client_id),
             "hostname": socket.gethostname(),
             "os_info": get_detailed_os_info(),
             "screens": screens_list,
@@ -319,6 +320,7 @@ class AppController(QObject):
             hb_data = {
                 "type": "heartbeat",
                 "client_id": self.client_id,
+                "token": getattr(self.config, "token", self.client_id),
                 "audio_enabled": self.server_audio_enabled,
                 "stream_allowed": self.stream_allowed,
                 "standby": self.is_standby,

@@ -29,6 +29,7 @@ class ClientConfig:
     network_caching: int = 1000
     api_port: int = 8000
     client_id: str = ""
+    token: str = ""
 
     def __post_init__(self) -> None:
         """Валидация и очистка значений конфигурации."""
@@ -64,14 +65,28 @@ class ClientConfig:
         except (ValueError, TypeError):
             self.api_port = 8000
 
+        # Синхронизация client_id и постоянного токена
+        if not isinstance(self.token, str) or not self.token.strip():
+            if isinstance(self.client_id, str) and self.client_id.strip():
+                self.token = self.client_id.strip()
+        else:
+            self.token = self.token.strip()
+
         if not isinstance(self.client_id, str) or not self.client_id.strip():
-            try:
-                host = socket.gethostname() or "client"
-            except Exception:
-                host = "client"
-            self.client_id = f"{host}-{uuid.uuid4().hex[:6]}"
+            if self.token:
+                self.client_id = self.token
+            else:
+                try:
+                    host = socket.gethostname() or "client"
+                except Exception:
+                    host = "client"
+                self.client_id = f"{host}-{uuid.uuid4().hex[:12]}"
+                self.token = self.client_id
         else:
             self.client_id = self.client_id.strip()
+
+        if not self.token:
+            self.token = self.client_id
 
     @property
     def rtsp_url(self) -> str:
@@ -104,14 +119,46 @@ class ClientConfig:
     @classmethod
     def model_validate(cls, data: Dict[str, Any]) -> ClientConfig:
         """Создание экземпляра из словаря данных."""
+        cid = str(data.get("client_id", "")).strip()
+        tok = str(data.get("token", "")).strip() or cid
         return cls(
             server_host=str(data.get("server_host", "")),
             rtsp_port=data.get("rtsp_port", 8554),
             stream_path=str(data.get("stream_path", "live")),
             network_caching=data.get("network_caching", 1000),
             api_port=data.get("api_port", 8000),
-            client_id=str(data.get("client_id", "")),
+            client_id=cid or tok,
+            token=tok or cid,
         )
+
+
+def get_or_create_persistent_token(config_dir: Path) -> str:
+    """
+    Получает или создает постоянный уникальный токен клиента.
+    Токен сохраняется в файле client_token.txt рядом с конфигурацией.
+    """
+    token_file = config_dir / "client_token.txt"
+    if token_file.exists():
+        try:
+            with open(token_file, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+                if saved:
+                    return saved
+        except Exception as e:
+            logger.debug("Не удалось прочитать client_token.txt: %s", e)
+
+    try:
+        host = socket.gethostname() or "client"
+    except Exception:
+        host = "client"
+    new_token = f"{host}-{uuid.uuid4().hex[:12]}"
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        with open(token_file, "w", encoding="utf-8") as f:
+            f.write(new_token)
+    except Exception as e:
+        logger.debug("Не удалось записать client_token.txt: %s", e)
+    return new_token
 
 
 class ConfigManager:
@@ -138,10 +185,14 @@ class ConfigManager:
         """
         Загружает конфигурацию из файла.
         Если файл отсутствует или поврежден, возвращает конфигурацию по умолчанию.
+        Всегда сохраняет и использует постоянный токен устройства.
         """
+        base_dir = self.config_path.parent
+        persistent_token = get_or_create_persistent_token(base_dir)
+
         if not self.config_path.exists():
             logger.info("Файл конфигурации %s не найден. Создается конфигурация по умолчанию.", self.config_path)
-            self._current_config = ClientConfig()
+            self._current_config = ClientConfig(client_id=persistent_token, token=persistent_token)
             self.save(self._current_config)
             return self._current_config
 
@@ -149,19 +200,26 @@ class ConfigManager:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 content = f.read().strip()
                 if not content:
-                    self._current_config = ClientConfig()
+                    self._current_config = ClientConfig(client_id=persistent_token, token=persistent_token)
                     self.save(self._current_config)
                     return self._current_config
                 data = json.loads(content)
+                if not data.get("client_id") and not data.get("token"):
+                    data["client_id"] = persistent_token
+                    data["token"] = persistent_token
+                elif not data.get("token"):
+                    data["token"] = data.get("client_id") or persistent_token
+                elif not data.get("client_id"):
+                    data["client_id"] = data.get("token") or persistent_token
+
                 self._current_config = ClientConfig.model_validate(data)
-                # Если client_id отсутствовал в старом конфиге, сохраняем сгенерированный
-                if not data.get("client_id"):
-                    self.save(self._current_config)
+                # Всегда сохраняем обновленную конфигурацию с токеном
+                self.save(self._current_config)
                 logger.info("Конфигурация успешно загружена из %s (client_id=%s)", self.config_path, self._current_config.client_id)
                 return self._current_config
         except Exception as err:
             logger.error("Ошибка при чтении файла конфигурации %s: %s. Используются значения по умолчанию.", self.config_path, err)
-            self._current_config = ClientConfig()
+            self._current_config = ClientConfig(client_id=persistent_token, token=persistent_token)
             return self._current_config
 
     def save(self, config: ClientConfig) -> bool:
@@ -207,15 +265,19 @@ class ConfigManager:
         network_caching: int = 300,
         api_port: int = 8000,
         client_id: Optional[str] = None,
+        token: Optional[str] = None,
     ) -> ClientConfig:
         """Обновляет поля конфигурации и сохраняет файл."""
+        effective_cid = client_id or self._current_config.client_id
+        effective_tok = token or self._current_config.token or effective_cid
         new_config = ClientConfig(
             server_host=server_host,
             rtsp_port=rtsp_port,
             stream_path=stream_path,
             network_caching=network_caching,
             api_port=api_port,
-            client_id=client_id or self._current_config.client_id,
+            client_id=effective_cid,
+            token=effective_tok,
         )
         self.save(new_config)
         return new_config

@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from fastapi import (
     Depends,
@@ -391,15 +391,40 @@ class ClientAudioControlRequest(BaseModel):
     audio_enabled: bool
 
 
+def normalize_time_value(v: Any) -> str:
+    s = str(v).strip()
+    if ":" in s:
+        parts = s.split(":")
+        if len(parts) >= 2:
+            try:
+                h = int(parts[0])
+                m = int(parts[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    return f"{h:02d}:{m:02d}"
+            except (ValueError, TypeError):
+                pass
+    return "08:00"
+
+
 class ClientUpdateRequest(BaseModel):
     client_id: str
     custom_name: Optional[str] = None
     os_info: Optional[str] = None
     ip: Optional[str] = None
+    stream_allowed: Optional[bool] = None
+    audio_enabled: Optional[bool] = None
+    standby: Optional[bool] = None
     schedule_mode: Optional[str] = None
     schedule_start: Optional[str] = None
     schedule_end: Optional[str] = None
     schedule_days: Optional[List[int]] = None
+
+    @field_validator("schedule_start", "schedule_end", mode="before")
+    @classmethod
+    def validate_schedule_times(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_time_value(v)
 
 
 class ScheduleGlobalUpdateRequest(BaseModel):
@@ -409,6 +434,11 @@ class ScheduleGlobalUpdateRequest(BaseModel):
     days_of_week: List[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
     action_off: Literal["standby", "adb_sleep"] = "standby"
 
+    @field_validator("start_time", "end_time", mode="before")
+    @classmethod
+    def validate_global_times(cls, v: Any) -> str:
+        return normalize_time_value(v)
+
 
 class ClientScheduleUpdateRequest(BaseModel):
     client_id: str
@@ -416,6 +446,13 @@ class ClientScheduleUpdateRequest(BaseModel):
     schedule_start: Optional[str] = "08:00"
     schedule_end: Optional[str] = "20:00"
     schedule_days: Optional[List[int]] = None
+
+    @field_validator("schedule_start", "schedule_end", mode="before")
+    @classmethod
+    def validate_client_times(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_time_value(v)
 
 
 class ClientAddRequest(BaseModel):
@@ -425,6 +462,13 @@ class ClientAddRequest(BaseModel):
     schedule_mode: Optional[str] = "global"
     schedule_start: Optional[str] = "08:00"
     schedule_end: Optional[str] = "20:00"
+
+    @field_validator("schedule_start", "schedule_end", mode="before")
+    @classmethod
+    def validate_add_times(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        return normalize_time_value(v)
 
 
 class ClientAdbRequest(BaseModel):
@@ -474,12 +518,15 @@ async def control_client_audio(req: ClientAudioControlRequest):
 
 @app.post("/api/clients/update")
 async def update_client_meta(req: ClientUpdateRequest):
-    """Обновление метаданных клиентского устройства (имя, ОС, IP, расписание)."""
+    """Обновление метаданных клиентского устройства (имя, ОС, IP, вещание, звук, расписание)."""
     success = await client_manager.update_client_meta(
         req.client_id,
         custom_name=req.custom_name,
         os_info=req.os_info,
         ip=req.ip,
+        stream_allowed=req.stream_allowed,
+        audio_enabled=req.audio_enabled,
+        standby=req.standby,
         schedule_mode=req.schedule_mode,
         schedule_start=req.schedule_start,
         schedule_end=req.schedule_end,
@@ -682,6 +729,7 @@ async def update_client_schedule_endpoint(req: ClientScheduleUpdateRequest):
 async def get_client_public_status(
     request: Request,
     client_id: Optional[str] = None,
+    token: Optional[str] = None,
     ip: Optional[str] = None,
 ):
     """
@@ -689,9 +737,12 @@ async def get_client_public_status(
     возвращает текущее состояние вещания, standby и расписания.
     """
     client_ip = ip.strip() if (ip and ip.strip()) else (request.client.host if request.client else "127.0.0.1")
+    search_token = token or client_id
     found_client = None
     if client_id:
         found_client = client_manager.get_client(client_id)
+    if not found_client and search_token:
+        found_client = next((c for c in client_manager._clients.values() if getattr(c, "token", None) == search_token), None)
     if not found_client:
         found_client = next((c for c in client_manager._clients.values() if c.ip == client_ip), None)
 
@@ -703,6 +754,7 @@ async def get_client_public_status(
         in_window = found_client.is_in_schedule_window(global_schedule=global_sched)
         return {
             "client_id": found_client.client_id,
+            "token": getattr(found_client, "token", found_client.client_id),
             "custom_name": found_client.custom_name,
             "ip": found_client.ip,
             "standby": found_client.standby,
@@ -718,6 +770,7 @@ async def get_client_public_status(
     # Если устройство пока не зарегистрировано в базе
     return {
         "client_id": client_id or f"unregistered-{client_ip}",
+        "token": search_token or client_id or f"unregistered-{client_ip}",
         "ip": client_ip,
         "standby": not global_status["is_active_now"],
         "audio_enabled": True,

@@ -109,6 +109,22 @@ class ScheduleConfig(BaseModel):
     days_of_week: List[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
     action_off: Literal["standby", "adb_sleep"] = "standby"
 
+    @field_validator("start_time", "end_time", mode="before")
+    @classmethod
+    def validate_and_normalize_time(cls, v: Any) -> str:
+        s = str(v).strip()
+        if ":" in s:
+            parts = s.split(":")
+            if len(parts) >= 2:
+                try:
+                    h = int(parts[0])
+                    m = int(parts[1])
+                    if 0 <= h <= 23 and 0 <= m <= 59:
+                        return f"{h:02d}:{m:02d}"
+                except (ValueError, TypeError):
+                    pass
+        return "08:00"
+
 
 class ServerSettings(BaseModel):
     media_dir: str = Field(default="media")

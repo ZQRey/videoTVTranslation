@@ -222,13 +222,17 @@ class PlayerWindow(QMainWindow):
         if not self._vlc_player:
             return
 
-        should_play = self.is_primary and self.audio_allowed
+        should_play = self.is_primary and self.audio_allowed and not self.is_standby
         if should_play:
             self._vlc_player.audio_set_mute(False)
-            logger.info("Дисплей [%s] — Основной: звук ВКЛЮЧЕН", self.target_screen.name())
+            try:
+                self._vlc_player.audio_set_volume(100)
+            except Exception:
+                pass
+            logger.info("Дисплей [%s] — Основной: звук ВКЛЮЧЕН (100%%)", self.target_screen.name())
         else:
             self._vlc_player.audio_set_mute(True)
-            reason = "Дополнительный экран" if not self.is_primary else "Отключен сервером вещания"
+            reason = "Дополнительный экран" if not self.is_primary else ("Режим Standby" if self.is_standby else "Отключен сервером вещания")
             logger.info("Дисплей [%s] — Звук ЗАГЛУШЕН (%s)", self.target_screen.name(), reason)
 
         audio_status = "ВКЛ" if should_play else "ВЫКЛ (Mute)"
@@ -256,13 +260,22 @@ class PlayerWindow(QMainWindow):
 
     def _on_playback_started(self) -> None:
         """Поток успешно запущен — скрываем оверлей подключения."""
+        if self.is_standby:
+            self.overlay_frame.hide()
+            return
         logger.info("Поток успешно запущен на экране [%s]", self.target_screen.name())
         self.overlay_frame.hide()
         self._reconnect_timer.stop()
+        # Гарантированное восстановление звука после открытия аудиотрека драйвером libVLC
+        self._apply_audio_routing()
+        QTimer.singleShot(200, self._apply_audio_routing)
+        QTimer.singleShot(600, self._apply_audio_routing)
 
     def _on_playback_failed(self, reason: str) -> None:
         """Сбой воспроизведения — отображаем оверлей и запускаем реконнект."""
-        if self._is_closing:
+        if self._is_closing or self.is_standby or not self.stream_allowed:
+            self.overlay_frame.hide()
+            self._reconnect_timer.stop()
             return
         logger.warning("Сбой воспроизведения на экране [%s]: %s", self.target_screen.name(), reason)
         self.status_title.setText("Подключение к серверу вещания...")
@@ -273,7 +286,9 @@ class PlayerWindow(QMainWindow):
 
     def _on_playback_ended(self) -> None:
         """Поток завершился (смена трека в плейлисте сервера) — быстрое бесшовное переподключение."""
-        if self._is_closing:
+        if self._is_closing or self.is_standby or not self.stream_allowed:
+            self.overlay_frame.hide()
+            self._reconnect_timer.stop()
             return
         logger.info("Поток завершился на экране [%s]. Бесшовный переход к следующему треку...", self.target_screen.name())
         # При штатной смене треков в очереди сервера следующий трек начинается через доли секунды.
@@ -282,7 +297,9 @@ class PlayerWindow(QMainWindow):
 
     def _do_reconnect(self) -> None:
         """Попытка переподключения по таймеру."""
-        if self._is_closing:
+        if self._is_closing or self.is_standby or not self.stream_allowed:
+            self.overlay_frame.hide()
+            self._reconnect_timer.stop()
             return
         logger.info("Попытка переподключения к %s на экране [%s]...", self.rtsp_url, self.target_screen.name())
         self.play()
@@ -296,6 +313,7 @@ class PlayerWindow(QMainWindow):
 
         if self.is_standby:
             logger.debug("Экран [%s] находится в режиме Standby, воспроизведение пропущено.", self.target_screen.name())
+            self._reconnect_timer.stop()
             self.overlay_frame.hide()
             if self._vlc_player:
                 try:
@@ -303,6 +321,7 @@ class PlayerWindow(QMainWindow):
                     self._vlc_player.stop()
                 except Exception:
                     pass
+            self.overlay_frame.hide()
             return
 
         if not self.stream_allowed:
@@ -413,7 +432,9 @@ class PlayerWindow(QMainWindow):
                     self._vlc_player.stop()
                 except Exception:
                     pass
+            self.overlay_frame.hide()
         else:
+            self.overlay_frame.hide()
             if self.stream_allowed:
                 self.play()
 

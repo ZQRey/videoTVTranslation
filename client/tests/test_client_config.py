@@ -105,6 +105,20 @@ class TestConfigManager(unittest.TestCase):
         self.assertEqual(mgr.config.server_host, "")
         self.assertEqual(mgr.config.rtsp_port, 8554)
 
+    def test_persistent_token(self):
+        from config import get_or_create_persistent_token
+        cfg_dir = Path(self.test_dir)
+        tok1 = get_or_create_persistent_token(cfg_dir)
+        self.assertTrue(bool(tok1))
+        # Second call returns the same token
+        tok2 = get_or_create_persistent_token(cfg_dir)
+        self.assertEqual(tok1, tok2)
+
+        # ConfigManager loads and preserves token
+        mgr = ConfigManager(config_path=self.config_path)
+        self.assertEqual(mgr.config.token, tok1)
+
 
 if __name__ == "__main__":
     unittest.main()
+

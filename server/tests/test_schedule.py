@@ -297,6 +297,54 @@ class TestScheduleAPIEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertIn("is_in_schedule", status)
         self.assertIn("standby", status)
 
+    async def test_custom_minute_interval_and_token_query(self):
+        """Проверка произвольных минутных интервалов (07:00-09:28) и поиска статуса по постоянному токену."""
+        # 1. Проверка валидации произвольного минутного интервала в ScheduleGlobalUpdateRequest
+        update_req = ScheduleGlobalUpdateRequest(
+            mode="interval",
+            start_time="07:00",
+            end_time="09:28",
+            days_of_week=[1, 2, 3, 4, 5, 6, 7],
+            action_off="standby",
+        )
+        res = await update_global_schedule(update_req)
+        self.assertTrue(res.get("success"))
+        self.assertEqual(res["schedule"]["start_time"], "07:00")
+        self.assertEqual(res["schedule"]["end_time"], "09:28")
+
+        # 2. Проверка ненормализованного формата "7:00" -> "07:00"
+        norm_req = ScheduleGlobalUpdateRequest(
+            mode="interval",
+            start_time="7:00",
+            end_time="9:28",
+            days_of_week=[1, 2, 3, 4, 5, 6, 7],
+            action_off="standby",
+        )
+        self.assertEqual(norm_req.start_time, "07:00")
+        self.assertEqual(norm_req.end_time, "09:28")
+
+        # 3. Регистрация клиента с постоянным токеном
+        c = await client_manager.register_or_update(
+            client_id="client-min-tv",
+            ip="192.168.1.199",
+            data={
+                "hostname": "min-tv",
+                "token": "android-box-token-abcxyz",
+            },
+        )
+        self.assertEqual(c.token, "android-box-token-abcxyz")
+
+        # 4. Запрос статуса по token
+        dummy_req = MagicMock()
+        dummy_req.client.host = "192.168.1.199"
+        status = await get_client_public_status(
+            request=dummy_req,
+            token="android-box-token-abcxyz",
+        )
+        self.assertEqual(status["client_id"], "client-min-tv")
+        self.assertEqual(status["token"], "android-box-token-abcxyz")
+
 
 if __name__ == "__main__":
     unittest.main()
+

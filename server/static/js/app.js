@@ -58,11 +58,15 @@ document.addEventListener('alpine:init', () => {
             server_date: '',
             server_weekday: 1
         },
+        scheduleLoaded: false,
         savingSchedule: false,
 
         // Добавление и детальное редактирование устройства вручную
         showAddDeviceModal: false,
         showEditClientModal: false,
+        editingClientStreamAllowed: true,
+        editingClientAudioEnabled: true,
+        editingClientStandby: false,
         newDevice: {
             ip: '',
             name: '',
@@ -596,11 +600,26 @@ document.addEventListener('alpine:init', () => {
                 const res = await fetch('/api/schedule');
                 if (res.ok) {
                     const data = await res.json();
-                    this.schedule = { ...this.schedule, ...data };
+                    if (!this.scheduleLoaded) {
+                        this.schedule = { ...this.schedule, ...data };
+                        this.scheduleLoaded = true;
+                    } else {
+                        // При периодическом фоновом опросе обновляем ТОЛЬКО динамический статус эфира,
+                        // не сбрасывая введенное пользователем время или выбранный режим
+                        this.schedule.is_active_now = data.is_active_now;
+                        this.schedule.server_time = data.server_time;
+                        this.schedule.server_date = data.server_date;
+                        this.schedule.server_weekday = data.server_weekday;
+                    }
                 }
             } catch (err) {
                 console.debug('Не удалось получить расписание:', err);
             }
+        },
+
+        async setScheduleMode(mode) {
+            this.schedule.mode = mode;
+            await this.saveSchedule();
         },
 
         async saveSchedule() {
@@ -673,6 +692,9 @@ document.addEventListener('alpine:init', () => {
             this.editingClientName = client.custom_name || client.hostname;
             this.editingClientOs = client.os_info || '';
             this.editingClientIp = client.ip || '';
+            this.editingClientStreamAllowed = client.stream_allowed !== false;
+            this.editingClientAudioEnabled = client.audio_enabled !== false;
+            this.editingClientStandby = Boolean(client.standby);
             this.editingClientScheduleMode = client.schedule_mode || 'global';
             this.editingClientScheduleStart = client.schedule_start || '08:00';
             this.editingClientScheduleEnd = client.schedule_end || '20:00';
@@ -696,6 +718,9 @@ document.addEventListener('alpine:init', () => {
                     custom_name: this.editingClientName.trim(),
                     os_info: (this.editingClientOs || '').trim(),
                     ip: (this.editingClientIp || '').trim(),
+                    stream_allowed: this.editingClientStreamAllowed,
+                    audio_enabled: this.editingClientAudioEnabled,
+                    standby: this.editingClientStandby,
                     schedule_mode: this.editingClientScheduleMode,
                     schedule_start: this.editingClientScheduleStart,
                     schedule_end: this.editingClientScheduleEnd,

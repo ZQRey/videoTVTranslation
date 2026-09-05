@@ -587,5 +587,80 @@ class TestExtendedOsDetection(unittest.TestCase):
         self.assertEqual(device_android.os_family, "android")
 
 
+class TestPersistentTokenAndModalUpdates(unittest.IsolatedAsyncioTestCase):
+    """Тестирование дедупликации клиентов по постоянному токену и расширенного обновления настроек."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.clients_file = Path(self.temp_dir) / "clients.json"
+        self.mgr = ClientManager(storage_path=self.clients_file)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    async def test_client_token_deduplication(self):
+        ws1 = AsyncMock()
+        # 1. Первичная регистрация клиента с токеном
+        d1 = {
+            "hostname": "LIVING-ROOM-TV",
+            "token": "persistent-token-12345",
+            "custom_name": "Большой ТВ",
+            "screens": ["HDMI-1"],
+        }
+        c1 = await self.mgr.register_or_update("client-temp-id-1", "192.168.1.55", d1, ws1)
+        self.assertEqual(c1.token, "persistent-token-12345")
+        self.assertEqual(c1.custom_name, "Большой ТВ")
+        self.assertEqual(len(self.mgr._clients), 1)
+
+        # 2. Клиент перезапустился, сгенерировал новый ephemeral client_id, но отправил тот же токен
+        ws2 = AsyncMock()
+        d2 = {
+            "hostname": "LIVING-ROOM-TV",
+            "token": "persistent-token-12345",
+            "screens": ["HDMI-1"],
+        }
+        c2 = await self.mgr.register_or_update("client-temp-id-2", "192.168.1.55", d2, ws2)
+        # Должен быть тот же объект устройства, а не дубликат!
+        self.assertEqual(len(self.mgr._clients), 1)
+        self.assertIn("client-temp-id-2", self.mgr._clients)
+        self.assertNotIn("client-temp-id-1", self.mgr._clients)
+        self.assertEqual(c2.custom_name, "Большой ТВ")  # Имя сохранено
+        self.assertEqual(c2.token, "persistent-token-12345")
+
+    async def test_client_update_meta_extended(self):
+        ws = AsyncMock()
+        d = {"hostname": "OFFICE-PC", "token": "tok-999"}
+        await self.mgr.register_or_update("pc-999", "192.168.1.99", d, ws)
+
+        # Обновляем все параметры через update_client_meta
+        success = await self.mgr.update_client_meta(
+            client_id="pc-999",
+            custom_name="ПК Офис",
+            os_info="Windows 11 Enterprise",
+            ip="192.168.1.200",
+            stream_allowed=False,
+            audio_enabled=False,
+            standby=True,
+            schedule_mode="interval",
+            schedule_start="07:00",
+            schedule_end="09:28",
+            schedule_days=[1, 2, 3]
+        )
+        self.assertTrue(success)
+        updated = self.mgr.get_client("pc-999")
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.custom_name, "ПК Офис")
+        self.assertEqual(updated.os_info, "Windows 11 Enterprise")
+        self.assertEqual(updated.ip, "192.168.1.200")
+        self.assertFalse(updated.stream_allowed)
+        self.assertFalse(updated.audio_enabled)
+        self.assertTrue(updated.standby)
+        self.assertEqual(updated.schedule_mode, "interval")
+        self.assertEqual(updated.schedule_start, "07:00")
+        self.assertEqual(updated.schedule_end, "09:28")
+        self.assertEqual(updated.schedule_days, [1, 2, 3])
+
+
 if __name__ == "__main__":
     unittest.main()
+

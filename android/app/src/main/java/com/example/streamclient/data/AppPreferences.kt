@@ -28,6 +28,21 @@ class AppPreferences(private val context: Context) {
         private val KEY_RTSP_PORT = intPreferencesKey("rtsp_port")
         private val KEY_HLS_PORT = intPreferencesKey("hls_port")
         private val KEY_STREAM_PATH = stringPreferencesKey("stream_path")
+        private val KEY_CLIENT_TOKEN = stringPreferencesKey("client_token")
+    }
+
+    /**
+     * Получение или создание постоянного уникального токена клиента Android TV.
+     */
+    suspend fun getClientToken(): String {
+        val prefs = context.dataStore.data.first()
+        val existing = prefs[KEY_CLIENT_TOKEN]
+        if (!existing.isNullOrBlank()) {
+            return existing
+        }
+        val newToken = "android-tv-${java.util.UUID.randomUUID()}"
+        context.dataStore.edit { it[KEY_CLIENT_TOKEN] = newToken }
+        return newToken
     }
 
     /**

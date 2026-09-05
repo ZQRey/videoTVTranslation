@@ -329,12 +329,12 @@
                     <div class="flex flex-wrap items-center gap-3">
                         <label class="text-xs font-medium text-slate-300 mr-1">Глобальный режим вещания:</label>
                         <div class="inline-flex rounded-lg bg-slate-950 p-1 border border-slate-800">
-                            <button type="button" @click="schedule.mode = '24/7'"
+                            <button type="button" @click="setScheduleMode('24/7')"
                                     :class="schedule.mode === '24/7' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'"
                                     class="px-4 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5">
                                 <span>⚡ Круглосуточно (24/7)</span>
                             </button>
-                            <button type="button" @click="schedule.mode = 'interval'"
+                            <button type="button" @click="setScheduleMode('interval')"
                                     :class="schedule.mode === 'interval' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'"
                                     class="px-4 py-1.5 rounded-md text-xs font-medium transition flex items-center gap-1.5">
                                 <span>⏰ По расписанию (интервал)</span>
@@ -350,13 +350,13 @@
                             <!-- Время начала -->
                             <div>
                                 <label class="block text-slate-400 font-medium mb-1.5">Время начала вещания:</label>
-                                <input type="time" x-model="schedule.start_time"
+                                <input type="time" step="60" x-model="schedule.start_time"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500">
                             </div>
                             <!-- Время окончания -->
                             <div>
                                 <label class="block text-slate-400 font-medium mb-1.5">Время окончания вещания:</label>
-                                <input type="time" x-model="schedule.end_time"
+                                <input type="time" step="60" x-model="schedule.end_time"
                                        class="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-white font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500">
                             </div>
                             <!-- Поведение вне расписания -->
@@ -928,7 +928,7 @@
                                 <!-- Кнопка настройки устройства и персонального расписания -->
                                 <button @click="openEditClientModal(client)"
                                         class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition"
-                                        title="Настройки клиента и расписания">
+                                        title="Настройки клиента и вещания">
                                     <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                                 </button>
 
@@ -1143,7 +1143,7 @@
                                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                             </div>
                             <div>
-                                <h3 class="text-sm font-semibold text-white">Параметры устройства и расписание</h3>
+                                <h3 class="text-sm font-semibold text-white">Настройки клиента и вещания</h3>
                                 <p class="text-[11px] text-slate-400">ID: <span class="font-mono text-slate-300" x-text="editingClientId"></span></p>
                             </div>
                         </div>
@@ -1175,6 +1175,49 @@
                                        x-model="editingClientOs"
                                        placeholder="Windows 11 Pro / Android 13"
                                        class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                            </div>
+                        </div>
+
+                        <!-- Управление вещанием и звуком на клиенте -->
+                        <div class="p-3.5 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2.5">
+                            <div class="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                                Состояние вещания и звука
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <!-- Вещание -->
+                                <button type="button"
+                                        @click="editingClientStreamAllowed = !editingClientStreamAllowed"
+                                        class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition text-center"
+                                        :class="editingClientStreamAllowed ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/40' : 'bg-rose-950/40 border-rose-500/50 text-rose-300 hover:bg-rose-900/40'">
+                                    <div class="flex items-center gap-1.5 font-medium text-xs">
+                                        <span class="w-2 h-2 rounded-full" :class="editingClientStreamAllowed ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                                        <span x-text="editingClientStreamAllowed ? 'Вещание: ВКЛ' : 'Вещание: ЗАПРЕТ'"></span>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400" x-text="editingClientStreamAllowed ? 'Поток передается' : 'Прием запрещен'"></span>
+                                </button>
+
+                                <!-- Звук -->
+                                <button type="button"
+                                        @click="editingClientAudioEnabled = !editingClientAudioEnabled"
+                                        class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition text-center"
+                                        :class="editingClientAudioEnabled ? 'bg-slate-900 border-slate-700 text-slate-200 hover:border-slate-600' : 'bg-amber-950/40 border-amber-500/50 text-amber-300 hover:bg-amber-900/40'">
+                                    <div class="flex items-center gap-1.5 font-medium text-xs">
+                                        <span x-text="editingClientAudioEnabled ? '🔊 Звук: ВКЛ' : '🔇 Звук: MUTE'"></span>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400" x-text="editingClientAudioEnabled ? 'Аудио активно' : 'Звук заглушен'"></span>
+                                </button>
+
+                                <!-- Standby -->
+                                <button type="button"
+                                        @click="editingClientStandby = !editingClientStandby"
+                                        class="p-2 rounded-lg border flex flex-col items-center justify-center gap-1 transition text-center"
+                                        :class="editingClientStandby ? 'bg-purple-950/50 border-purple-500/50 text-purple-300 hover:bg-purple-900/50' : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'">
+                                    <div class="flex items-center gap-1.5 font-medium text-xs">
+                                        <svg class="w-3.5 h-3.5" :class="editingClientStandby ? 'text-purple-400' : 'text-slate-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                                        <span x-text="editingClientStandby ? 'Standby: ВКЛ' : 'Standby: ВЫКЛ'"></span>
+                                    </div>
+                                    <span class="text-[10px] text-slate-400" x-text="editingClientStandby ? 'Черный экран' : 'Обычное вещание'"></span>
+                                </button>
                             </div>
                         </div>
 
@@ -1217,12 +1260,14 @@
                                     <div>
                                         <label class="block text-slate-400 text-[11px] mb-1">Время включения эфира:</label>
                                         <input type="time"
+                                               step="60"
                                                x-model="editingClientScheduleStart"
                                                class="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white font-mono text-center focus:outline-none focus:ring-1 focus:ring-indigo-500">
                                     </div>
                                     <div>
                                         <label class="block text-slate-400 text-[11px] mb-1">Время ухода в Standby:</label>
                                         <input type="time"
+                                               step="60"
                                                x-model="editingClientScheduleEnd"
                                                class="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-white font-mono text-center focus:outline-none focus:ring-1 focus:ring-indigo-500">
                                     </div>

@@ -40,8 +40,10 @@ class ClientDevice:
         schedule_end: str = "20:00",
         schedule_days: Optional[List[int]] = None,
         standby_by_schedule: bool = False,
+        token: Optional[str] = None,
     ):
         self.client_id = client_id
+        self.token = token or client_id
         self.ip = ip
         self.hostname = hostname or client_id
         self.custom_name = custom_name or self.hostname
@@ -142,6 +144,7 @@ class ClientDevice:
         """Сериализация в словарь для передачи через REST API и WebSocket."""
         return {
             "client_id": self.client_id,
+            "token": self.token,
             "custom_name": self.custom_name,
             "ip": self.ip,
             "hostname": self.hostname,
@@ -167,6 +170,7 @@ class ClientDevice:
         """Сериализация для персистентного хранения в JSON-файле."""
         return {
             "client_id": self.client_id,
+            "token": self.token,
             "custom_name": self.custom_name,
             "ip": self.ip,
             "hostname": self.hostname,
@@ -217,6 +221,7 @@ class ClientManager:
                         continue
                     client = ClientDevice(
                         client_id=cid,
+                        token=item.get("token") or cid,
                         ip=item.get("ip", ""),
                         hostname=item.get("hostname", ""),
                         custom_name=item.get("custom_name", ""),
@@ -263,28 +268,46 @@ class ClientManager:
     ) -> ClientDevice:
         """Регистрация нового клиента или обновление информации существующего."""
         async with self._lock:
+            token = data.get("token") or client_id
             hostname = data.get("hostname", "Unknown-Host")
             os_info = data.get("os_info", "Unknown-OS")
             screens = data.get("screens", [])
             primary_screen = data.get("primary_screen", "")
 
-            if client_id in self._clients:
-                client = self._clients[client_id]
+            # Поиск существующего клиента по client_id ЛИБО по постоянному токену
+            client = self._clients.get(client_id)
+            if not client and token:
+                client = next((c for c in self._clients.values() if getattr(c, "token", None) == token), None)
+                if client:
+                    # Если ID изменился, но токен совпал: актуализируем ключ в реестре
+                    old_id = client.client_id
+                    if old_id in self._clients:
+                        del self._clients[old_id]
+                    client.client_id = client_id
+                    self._clients[client_id] = client
+                    logger.info("Клиент с токеном [%s] обновил client_id: %s -> %s", token, old_id, client_id)
+
+            if client:
+                client.token = token
                 client.ip = ip
                 client.hostname = hostname
-                client.os_info = os_info
-                client.screens = screens
-                client.primary_screen = primary_screen
+                if os_info and os_info != "Unknown-OS":
+                    client.os_info = os_info
+                if screens:
+                    client.screens = screens
+                if primary_screen:
+                    client.primary_screen = primary_screen
                 client.last_seen = time.time()
                 client.connected_at = time.strftime("%Y-%m-%d %H:%M:%S")
                 if websocket is not None:
                     client.websocket = websocket
-                logger.info("Обновлена телеметрия клиента [%s] (%s, %s)", client_id, hostname, ip)
+                logger.info("Обновлена телеметрия клиента [%s] (%s, %s, токен %s)", client_id, hostname, ip, token)
             else:
                 default_audio = self._global_audio_enabled
                 audio_enabled = data.get("audio_enabled", default_audio)
                 client = ClientDevice(
                     client_id=client_id,
+                    token=token,
                     ip=ip,
                     hostname=hostname,
                     custom_name=data.get("custom_name") or hostname,
@@ -302,8 +325,9 @@ class ClientManager:
                 )
                 self._clients[client_id] = client
                 logger.info(
-                    "Подключен новый клиент вещания [%s]: хост '%s', IP %s, экранов: %d",
+                    "Подключен новый клиент вещания [%s] (токен %s): хост '%s', IP %s, экранов: %d",
                     client_id,
+                    token,
                     hostname,
                     ip,
                     len(screens),
@@ -422,12 +446,15 @@ class ClientManager:
         custom_name: Optional[str] = None,
         os_info: Optional[str] = None,
         ip: Optional[str] = None,
+        stream_allowed: Optional[bool] = None,
+        audio_enabled: Optional[bool] = None,
+        standby: Optional[bool] = None,
         schedule_mode: Optional[str] = None,
         schedule_start: Optional[str] = None,
         schedule_end: Optional[str] = None,
         schedule_days: Optional[List[int]] = None,
     ) -> bool:
-        """Обновление пользовательского имени, информации об ОС, IP и параметров расписания клиента."""
+        """Обновление пользовательского имени, информации об ОС, IP, прав вещания и расписания клиента."""
         async with self._lock:
             client = self._clients.get(client_id)
             if not client:
@@ -438,6 +465,40 @@ class ClientManager:
                 client.os_info = os_info.strip()
             if ip is not None and ip.strip():
                 client.ip = ip.strip()
+            if stream_allowed is not None:
+                client.stream_allowed = bool(stream_allowed)
+                if client.websocket:
+                    try:
+                        await client.websocket.send_json({
+                            "type": "set_stream_allowed",
+                            "allowed": client.stream_allowed,
+                            "stream_allowed": client.stream_allowed,
+                        })
+                    except Exception:
+                        pass
+            if audio_enabled is not None:
+                client.audio_enabled = bool(audio_enabled)
+                if client.websocket:
+                    try:
+                        await client.websocket.send_json({
+                            "type": "set_audio",
+                            "audio_enabled": client.audio_enabled,
+                            "enabled": client.audio_enabled,
+                        })
+                    except Exception:
+                        pass
+            if standby is not None:
+                client.standby = bool(standby)
+                if not client.standby:
+                    client.standby_by_schedule = False
+                if client.websocket:
+                    try:
+                        await client.websocket.send_json({
+                            "type": "set_standby",
+                            "standby": client.standby,
+                        })
+                    except Exception:
+                        pass
             if schedule_mode is not None:
                 client.schedule_mode = schedule_mode
             if schedule_start is not None:
@@ -447,7 +508,7 @@ class ClientManager:
             if schedule_days is not None:
                 client.schedule_days = schedule_days
             self._save_persisted_clients()
-            logger.info("Метаданные клиента [%s] обновлены: имя='%s', os='%s', ip='%s', расписание='%s'", client_id, client.custom_name, client.os_info, client.ip, client.schedule_mode)
+            logger.info("Метаданные клиента [%s] обновлены: имя='%s', os='%s', ip='%s', stream=%s, audio=%s, standby=%s, расписание='%s'", client_id, client.custom_name, client.os_info, client.ip, client.stream_allowed, client.audio_enabled, client.standby, client.schedule_mode)
             return True
 
     async def update_client_schedule(

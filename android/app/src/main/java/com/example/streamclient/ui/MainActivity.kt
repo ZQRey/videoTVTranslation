@@ -301,7 +301,8 @@ class MainActivity : AppCompatActivity() {
         if (cleanHost.isEmpty()) return
 
         statusPollingJob = lifecycleScope.launch(Dispatchers.IO) {
-            val statusUrl = "http://$cleanHost:8000/api/client/status"
+            val token = appPreferences.getClientToken()
+            val statusUrl = "http://$cleanHost:8000/api/client/status?client_id=$token&token=$token"
             while (isActive) {
                 try {
                     val url = java.net.URL(statusUrl)
