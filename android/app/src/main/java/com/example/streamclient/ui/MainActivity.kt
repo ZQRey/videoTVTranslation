@@ -19,7 +19,12 @@ import com.example.streamclient.databinding.ActivityMainBinding
 import com.example.streamclient.player.PlayerController
 import com.example.streamclient.player.PlayerState
 import com.example.streamclient.util.SystemBarsUtil
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "MainActivity"
 
@@ -39,6 +44,9 @@ class MainActivity : AppCompatActivity() {
     private var currentConfig: StreamConfig = StreamConfig()
     private var isSettingsOpen = false
     private var backPressedTime = 0L
+
+    private var statusPollingJob: Job? = null
+    private var isStandbyActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +96,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 binding.tvStreamUrl.text = config.toDisplayString()
                 playerController.start(config)
+                startStatusPolling(config.serverHost)
             }
         }
     }
@@ -190,6 +199,7 @@ class MainActivity : AppCompatActivity() {
             currentConfig = newConfig
             binding.tvStreamUrl.text = newConfig.toDisplayString()
             playerController.start(newConfig)
+            startStatusPolling(newConfig.serverHost)
         }
         dialog.onDismissCallback = {
             isSettingsOpen = false
@@ -270,6 +280,74 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        statusPollingJob?.cancel()
+        statusPollingJob = null
         playerController.release()
+    }
+
+    /**
+     * Фоновый периодический опрос серверного расписания и статуса клиента (/api/client/status).
+     * Позволяет автоматически гасить экран в нерабочие часы (Standby) и возобновлять эфир.
+     */
+    private fun startStatusPolling(serverHost: String) {
+        statusPollingJob?.cancel()
+        val cleanHost = serverHost.trim()
+            .removePrefix("http://")
+            .removePrefix("https://")
+            .removePrefix("rtsp://")
+            .split(":")[0]
+            .trimEnd('/')
+
+        if (cleanHost.isEmpty()) return
+
+        statusPollingJob = lifecycleScope.launch(Dispatchers.IO) {
+            val statusUrl = "http://$cleanHost:8000/api/client/status"
+            while (isActive) {
+                try {
+                    val url = java.net.URL(statusUrl)
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.connectTimeout = 3000
+                    connection.readTimeout = 3000
+                    connection.requestMethod = "GET"
+                    if (connection.responseCode == 200) {
+                        val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                        val json = org.json.JSONObject(responseText)
+                        val isStandby = json.optBoolean("standby", false)
+                        val streamAllowed = json.optBoolean("stream_allowed", true)
+                        val audioEnabled = json.optBoolean("audio_enabled", true)
+
+                        val shouldBeStandby = isStandby || !streamAllowed
+
+                        withContext(Dispatchers.Main) {
+                            applyStandbyState(shouldBeStandby, audioEnabled)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Игнорируем временные сетевые таймауты при опросе
+                }
+                delay(4000)
+            }
+        }
+    }
+
+    /**
+     * Применение состояния Standby (черный экран и Mute) или возврат в штатный эфир.
+     */
+    private fun applyStandbyState(standby: Boolean, audioEnabled: Boolean) {
+        if (isStandbyActive != standby) {
+            isStandbyActive = standby
+            if (standby) {
+                Log.i(TAG, "Переход в спящий режим Standby (по расписанию или команде сервера)")
+                binding.standbyOverlay.visibility = View.VISIBLE
+                playerController.setStandby(true)
+            } else {
+                Log.i(TAG, "Выход из спящего режима Standby — возобновление эфира")
+                binding.standbyOverlay.visibility = View.GONE
+                playerController.setStandby(false)
+            }
+        }
+        if (!standby) {
+            playerController.setAudioEnabled(audioEnabled)
+        }
     }
 }

@@ -96,3 +96,7 @@ server/auto.key
 
 # Custom plugins keep
 !server/plugins_custom/.gitkeep
+
+# Local AI agent rules
+AGENTS.md
+.agents/

@@ -10,9 +10,9 @@ import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from fastapi import (
     Depends,
@@ -47,6 +47,7 @@ from core.logger import log_broadcaster, setup_logging
 from core.playlist import PlaylistManager
 from core.plugins.manager import STARTER_PYTHON_PLUGIN_TEMPLATE, PluginManager
 from core.scanner import MediaScanner
+from core.schedule_enforcer import schedule_enforcer
 from core.streamer import StreamOrchestrator
 
 # Инициализация логирования
@@ -68,10 +69,12 @@ async def lifespan(app: FastAPI):
     log_broadcaster.start()
     scanner.start()
     streamer.start()
+    schedule_enforcer.start()
 
     yield
 
     logger.info("Завершение работы сервисов медиасервера...")
+    await schedule_enforcer.stop()
     await streamer.stop()
     await scanner.stop()
     await log_broadcaster.stop()
@@ -126,6 +129,7 @@ async def auth_middleware(request: Request, call_next):
         or path == "/api/auth/login"
         or path.startswith("/static/")
         or path == "/favicon.ico"
+        or path == "/api/client/status"
     ):
         return await call_next(request)
 
@@ -392,12 +396,35 @@ class ClientUpdateRequest(BaseModel):
     custom_name: Optional[str] = None
     os_info: Optional[str] = None
     ip: Optional[str] = None
+    schedule_mode: Optional[str] = None
+    schedule_start: Optional[str] = None
+    schedule_end: Optional[str] = None
+    schedule_days: Optional[List[int]] = None
+
+
+class ScheduleGlobalUpdateRequest(BaseModel):
+    mode: Literal["24/7", "interval"]
+    start_time: str = "08:00"
+    end_time: str = "20:00"
+    days_of_week: List[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
+    action_off: Literal["standby", "adb_sleep"] = "standby"
+
+
+class ClientScheduleUpdateRequest(BaseModel):
+    client_id: str
+    schedule_mode: Literal["global", "24/7", "interval"]
+    schedule_start: Optional[str] = "08:00"
+    schedule_end: Optional[str] = "20:00"
+    schedule_days: Optional[List[int]] = None
 
 
 class ClientAddRequest(BaseModel):
     ip: str
     custom_name: str
     os_info: Optional[str] = "Android"
+    schedule_mode: Optional[str] = "global"
+    schedule_start: Optional[str] = "08:00"
+    schedule_end: Optional[str] = "20:00"
 
 
 class ClientAdbRequest(BaseModel):
@@ -447,18 +474,24 @@ async def control_client_audio(req: ClientAudioControlRequest):
 
 @app.post("/api/clients/update")
 async def update_client_meta(req: ClientUpdateRequest):
-    """Обновление метаданных клиентского устройства (имя, ОС, IP)."""
+    """Обновление метаданных клиентского устройства (имя, ОС, IP, расписание)."""
     success = await client_manager.update_client_meta(
         req.client_id,
         custom_name=req.custom_name,
         os_info=req.os_info,
         ip=req.ip,
+        schedule_mode=req.schedule_mode,
+        schedule_start=req.schedule_start,
+        schedule_end=req.schedule_end,
+        schedule_days=req.schedule_days,
     )
     if not success:
         raise HTTPException(
             status_code=404,
             detail=f"Клиентское устройство с ID '{req.client_id}' не найдено"
         )
+    # Немедленно запускаем проверку расписания при изменении параметров
+    await schedule_enforcer.check_and_enforce_all()
     return {
         "success": True,
         "message": f"Данные клиента '{req.client_id}' успешно обновлены",
@@ -588,6 +621,112 @@ async def execute_adb_action_endpoint(req: ClientAdbRequest):
     return {
         **result,
         "state": await client_manager.get_state()
+    }
+
+
+# -------------------------------------------------------------
+# REST API: Управление расписанием вещания (24/7 и интервалы)
+# -------------------------------------------------------------
+
+
+@app.get("/api/schedule")
+async def get_schedule_status():
+    """Получение текущего глобального расписания и статуса вещания."""
+    return schedule_enforcer.get_global_status()
+
+
+@app.post("/api/schedule")
+async def update_global_schedule(req: ScheduleGlobalUpdateRequest):
+    """Обновление глобального расписания вещания (24/7 или интервал времени)."""
+    sched_dict = {
+        "mode": req.mode,
+        "start_time": req.start_time,
+        "end_time": req.end_time,
+        "days_of_week": req.days_of_week,
+        "action_off": req.action_off,
+    }
+    await config_manager.update_settings({"schedule": sched_dict})
+    await schedule_enforcer.check_and_enforce_all()
+    return {
+        "success": True,
+        "message": f"Глобальное расписание обновлено: {'Круглосуточно 24/7' if req.mode == '24/7' else f'{req.start_time} - {req.end_time}'}",
+        "schedule": schedule_enforcer.get_global_status(),
+        "clients": await client_manager.get_state(),
+    }
+
+
+@app.post("/api/clients/schedule")
+async def update_client_schedule_endpoint(req: ClientScheduleUpdateRequest):
+    """Обновление индивидуального расписания вещания для клиента."""
+    success = await client_manager.update_client_schedule(
+        client_id=req.client_id,
+        schedule_mode=req.schedule_mode,
+        schedule_start=req.schedule_start,
+        schedule_end=req.schedule_end,
+        schedule_days=req.schedule_days,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Клиентское устройство с ID '{req.client_id}' не найдено"
+        )
+    await schedule_enforcer.check_and_enforce_all()
+    return {
+        "success": True,
+        "message": f"Расписание клиента '{req.client_id}' успешно обновлено ({req.schedule_mode})",
+        "state": await client_manager.get_state(),
+    }
+
+
+@app.get("/api/client/status")
+async def get_client_public_status(
+    request: Request,
+    client_id: Optional[str] = None,
+    ip: Optional[str] = None,
+):
+    """
+    Публичный эндпоинт телеметрии для Android TV и внешних клиентов:
+    возвращает текущее состояние вещания, standby и расписания.
+    """
+    client_ip = ip.strip() if (ip and ip.strip()) else (request.client.host if request.client else "127.0.0.1")
+    found_client = None
+    if client_id:
+        found_client = client_manager.get_client(client_id)
+    if not found_client:
+        found_client = next((c for c in client_manager._clients.values() if c.ip == client_ip), None)
+
+    global_status = schedule_enforcer.get_global_status()
+    settings = config_manager.get_settings()
+    global_sched = getattr(settings, "schedule", None)
+
+    if found_client:
+        in_window = found_client.is_in_schedule_window(global_schedule=global_sched)
+        return {
+            "client_id": found_client.client_id,
+            "custom_name": found_client.custom_name,
+            "ip": found_client.ip,
+            "standby": found_client.standby,
+            "audio_enabled": found_client.audio_enabled,
+            "stream_allowed": found_client.stream_allowed,
+            "schedule_mode": found_client.schedule_mode,
+            "schedule_start": found_client.schedule_start,
+            "schedule_end": found_client.schedule_end,
+            "is_in_schedule": in_window,
+            "server_time": global_status.get("server_time"),
+        }
+
+    # Если устройство пока не зарегистрировано в базе
+    return {
+        "client_id": client_id or f"unregistered-{client_ip}",
+        "ip": client_ip,
+        "standby": not global_status["is_active_now"],
+        "audio_enabled": True,
+        "stream_allowed": True,
+        "schedule_mode": "global",
+        "schedule_start": global_status.get("start_time"),
+        "schedule_end": global_status.get("end_time"),
+        "is_in_schedule": global_status["is_active_now"],
+        "server_time": global_status.get("server_time"),
     }
 
 
@@ -986,6 +1125,7 @@ async def websocket_client_endpoint(websocket: WebSocket):
                     (c for c in clients_state["clients"] if c["client_id"] == registered_id),
                     None
                 )
+                audio_on = client_obj["audio_enabled"] if client_obj else True
                 stream_on = client_obj["stream_allowed"] if client_obj else True
                 standby_on = client_obj["standby"] if client_obj else False
                 await websocket.send_json({
@@ -995,6 +1135,8 @@ async def websocket_client_endpoint(websocket: WebSocket):
                     "stream_allowed": stream_on,
                     "standby": standby_on,
                 })
+                # Применяем расписание сразу при регистрации
+                await schedule_enforcer.check_and_enforce_all()
             elif msg_type == "heartbeat":
                 if registered_id:
                     await client_manager.update_heartbeat(registered_id, msg)

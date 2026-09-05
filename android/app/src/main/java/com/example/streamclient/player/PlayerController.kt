@@ -162,6 +162,35 @@ class PlayerController(
         currentConfig?.let { start(it) }
     }
 
+    private var isStandby = false
+
+    /**
+     * Перевод в спящий режим по серверному расписанию или ручной команде.
+     */
+    fun setStandby(standby: Boolean) {
+        if (isStandby == standby) return
+        isStandby = standby
+        if (standby) {
+            cancelReconnect()
+            exoPlayer?.volume = 0f
+            exoPlayer?.pause()
+        } else {
+            exoPlayer?.volume = 1f
+            if (!isManuallyPaused) {
+                resume()
+            }
+        }
+    }
+
+    /**
+     * Удаленное управление громкостью (Mute / Unmute).
+     */
+    fun setAudioEnabled(enabled: Boolean) {
+        if (!isStandby) {
+            exoPlayer?.volume = if (enabled) 1f else 0f
+        }
+    }
+
     /**
      * Запуск фонового цикла Reconnect Loop при потере соединения.
      */

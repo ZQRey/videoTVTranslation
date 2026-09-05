@@ -12,7 +12,7 @@ import shutil
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -102,6 +102,14 @@ class AuthConfig(BaseModel):
     domain: DomainAuthConfig = Field(default_factory=DomainAuthConfig)
 
 
+class ScheduleConfig(BaseModel):
+    mode: Literal["24/7", "interval"] = "24/7"
+    start_time: str = Field(default="08:00")
+    end_time: str = Field(default="20:00")
+    days_of_week: List[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
+    action_off: Literal["standby", "adb_sleep"] = "standby"
+
+
 class ServerSettings(BaseModel):
     media_dir: str = Field(default="media")
     scan_interval: int = Field(default=10, ge=1, le=3600)
@@ -113,6 +121,7 @@ class ServerSettings(BaseModel):
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     custom_plugins_meta: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    schedule: ScheduleConfig = Field(default_factory=ScheduleConfig)
 
     @field_validator("media_dir")
     @classmethod

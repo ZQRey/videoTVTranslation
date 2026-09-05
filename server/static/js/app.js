@@ -41,13 +41,35 @@ document.addEventListener('alpine:init', () => {
         editingClientName: '',
         editingClientOs: '',
         editingClientIp: '',
+        editingClientScheduleMode: 'global', // 'global' | '24/7' | 'interval'
+        editingClientScheduleStart: '08:00',
+        editingClientScheduleEnd: '20:00',
+        editingClientScheduleDays: [1, 2, 3, 4, 5, 6, 7],
 
-        // Добавление устройства вручную
+        // Управление расписанием вещания (24/7 и интервалы)
+        schedule: {
+            mode: '24/7', // '24/7' | 'interval'
+            start_time: '08:00',
+            end_time: '20:00',
+            days_of_week: [1, 2, 3, 4, 5, 6, 7],
+            action_off: 'standby',
+            is_active_now: true,
+            server_time: '--:--:--',
+            server_date: '',
+            server_weekday: 1
+        },
+        savingSchedule: false,
+
+        // Добавление и детальное редактирование устройства вручную
         showAddDeviceModal: false,
+        showEditClientModal: false,
         newDevice: {
             ip: '',
             name: '',
-            os: 'Android 13'
+            os: 'Android 13',
+            schedule_mode: 'global',
+            schedule_start: '08:00',
+            schedule_end: '20:00'
         },
 
         // Модальное окно переименования файла
@@ -143,12 +165,14 @@ document.addEventListener('alpine:init', () => {
             await this.fetchCurrentUser();
             this.fetchStatus();
             this.fetchConfig();
+            this.fetchSchedule();
             this.connectWebSocket();
             this.loadPluginTemplates();
 
-            // Периодический опрос телеметрии каждые 2 секунды
+            // Периодический опрос телеметрии и расписания каждые 2 секунды
             setInterval(() => {
                 this.fetchStatus();
+                this.fetchSchedule();
             }, 2000);
         },
 
@@ -503,6 +527,10 @@ document.addEventListener('alpine:init', () => {
             this.editingClientName = client.custom_name || client.hostname;
             this.editingClientOs = client.os_info || '';
             this.editingClientIp = client.ip || '';
+            this.editingClientScheduleMode = client.schedule_mode || 'global';
+            this.editingClientScheduleStart = client.schedule_start || '08:00';
+            this.editingClientScheduleEnd = client.schedule_end || '20:00';
+            this.editingClientScheduleDays = client.schedule_days ? [...client.schedule_days] : [1, 2, 3, 4, 5, 6, 7];
         },
 
         cancelEditClient() {
@@ -510,6 +538,10 @@ document.addEventListener('alpine:init', () => {
             this.editingClientName = '';
             this.editingClientOs = '';
             this.editingClientIp = '';
+            this.editingClientScheduleMode = 'global';
+            this.editingClientScheduleStart = '08:00';
+            this.editingClientScheduleEnd = '20:00';
+            this.editingClientScheduleDays = [1, 2, 3, 4, 5, 6, 7];
         },
 
         async saveClientName(clientId) {
@@ -521,7 +553,11 @@ document.addEventListener('alpine:init', () => {
             try {
                 const payload = {
                     client_id: clientId,
-                    custom_name: this.editingClientName.trim()
+                    custom_name: this.editingClientName.trim(),
+                    schedule_mode: this.editingClientScheduleMode,
+                    schedule_start: this.editingClientScheduleStart,
+                    schedule_end: this.editingClientScheduleEnd,
+                    schedule_days: this.editingClientScheduleDays,
                 };
                 if (this.editingClientOs && this.editingClientOs.trim()) {
                     payload.os_info = this.editingClientOs.trim();
@@ -546,6 +582,142 @@ document.addEventListener('alpine:init', () => {
                 }
             } catch (err) {
                 this.showToast('Ошибка сети при обновлении данных клиента', 'error');
+            } finally {
+                this.actionLoading = false;
+            }
+        },
+
+        // -------------------------------------------------------------
+        // Управление расписанием вещания (Global & Per-client)
+        // -------------------------------------------------------------
+
+        async fetchSchedule() {
+            try {
+                const res = await fetch('/api/schedule');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.schedule = { ...this.schedule, ...data };
+                }
+            } catch (err) {
+                console.debug('Не удалось получить расписание:', err);
+            }
+        },
+
+        async saveSchedule() {
+            this.savingSchedule = true;
+            try {
+                const res = await fetch('/api/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mode: this.schedule.mode,
+                        start_time: this.schedule.start_time,
+                        end_time: this.schedule.end_time,
+                        days_of_week: this.schedule.days_of_week,
+                        action_off: this.schedule.action_off || 'standby',
+                    })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    this.schedule = { ...this.schedule, ...data.schedule };
+                    if (data.clients) {
+                        this.clientsData = data.clients;
+                    }
+                    this.showToast(data.message, 'success');
+                } else {
+                    this.showToast(data.detail || 'Не удалось сохранить расписание', 'error');
+                }
+            } catch (err) {
+                this.showToast('Ошибка сети при сохранении расписания', 'error');
+            } finally {
+                this.savingSchedule = false;
+            }
+        },
+
+        toggleScheduleDay(dayNum) {
+            if (!this.schedule.days_of_week) this.schedule.days_of_week = [1, 2, 3, 4, 5, 6, 7];
+            const idx = this.schedule.days_of_week.indexOf(dayNum);
+            if (idx > -1) {
+                if (this.schedule.days_of_week.length > 1) {
+                    this.schedule.days_of_week.splice(idx, 1);
+                } else {
+                    this.showToast('Должен быть выбран хотя бы один день недели', 'warning');
+                }
+            } else {
+                this.schedule.days_of_week.push(dayNum);
+                this.schedule.days_of_week.sort();
+            }
+        },
+
+        toggleClientScheduleDay(dayNum) {
+            if (!this.editingClientScheduleDays) this.editingClientScheduleDays = [1, 2, 3, 4, 5, 6, 7];
+            const idx = this.editingClientScheduleDays.indexOf(dayNum);
+            if (idx > -1) {
+                if (this.editingClientScheduleDays.length > 1) {
+                    this.editingClientScheduleDays.splice(idx, 1);
+                } else {
+                    this.showToast('Должен быть выбран хотя бы один день недели', 'warning');
+                }
+            } else {
+                this.editingClientScheduleDays.push(dayNum);
+                this.editingClientScheduleDays.sort();
+            }
+        },
+
+        isClientDaySelected(dayNum) {
+            return (this.editingClientScheduleDays || [1, 2, 3, 4, 5, 6, 7]).includes(dayNum);
+        },
+
+        openEditClientModal(client) {
+            this.editingClientId = client.client_id;
+            this.editingClientName = client.custom_name || client.hostname;
+            this.editingClientOs = client.os_info || '';
+            this.editingClientIp = client.ip || '';
+            this.editingClientScheduleMode = client.schedule_mode || 'global';
+            this.editingClientScheduleStart = client.schedule_start || '08:00';
+            this.editingClientScheduleEnd = client.schedule_end || '20:00';
+            this.editingClientScheduleDays = client.schedule_days ? [...client.schedule_days] : [1, 2, 3, 4, 5, 6, 7];
+            this.showEditClientModal = true;
+        },
+
+        closeEditClientModal() {
+            this.showEditClientModal = false;
+        },
+
+        async saveEditingClient() {
+            if (!this.editingClientName || !this.editingClientName.trim()) {
+                this.showToast('Имя не может быть пустым', 'error');
+                return;
+            }
+            this.actionLoading = true;
+            try {
+                const payload = {
+                    client_id: this.editingClientId,
+                    custom_name: this.editingClientName.trim(),
+                    os_info: (this.editingClientOs || '').trim(),
+                    ip: (this.editingClientIp || '').trim(),
+                    schedule_mode: this.editingClientScheduleMode,
+                    schedule_start: this.editingClientScheduleStart,
+                    schedule_end: this.editingClientScheduleEnd,
+                    schedule_days: this.editingClientScheduleDays
+                };
+                const res = await fetch('/api/clients/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    if (data.state) {
+                        this.clientsData = data.state;
+                    }
+                    this.showEditClientModal = false;
+                    this.showToast(data.message, 'success');
+                } else {
+                    this.showToast(data.detail || 'Не удалось обновить настройки клиента', 'error');
+                }
+            } catch (err) {
+                this.showToast('Ошибка сети при сохранении настроек клиента', 'error');
             } finally {
                 this.actionLoading = false;
             }

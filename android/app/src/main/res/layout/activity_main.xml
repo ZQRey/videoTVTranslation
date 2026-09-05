@@ -190,4 +190,14 @@
 
     </com.example.streamclient.ui.view.FocusableConstraintLayout>
 
+    <!-- Оверлей спящего режима (Standby / Расписание): сплошной черный экран -->
+    <FrameLayout
+        android:id="@+id/standbyOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:clickable="true"
+        android:focusable="false"
+        android:visibility="gone" />
+
 </FrameLayout>

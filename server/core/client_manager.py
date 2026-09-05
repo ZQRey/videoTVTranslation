@@ -23,10 +23,10 @@ class ClientDevice:
         self,
         client_id: str,
         ip: str,
-        hostname: str,
-        os_info: str,
-        screens: List[str],
-        primary_screen: str,
+        hostname: str = "",
+        os_info: str = "",
+        screens: Optional[List[str]] = None,
+        primary_screen: str = "",
         custom_name: str = "",
         audio_enabled: bool = True,
         stream_allowed: bool = True,
@@ -35,13 +35,18 @@ class ClientDevice:
         connected_at: Optional[str] = None,
         last_seen: Optional[float] = None,
         websocket: Optional[WebSocket] = None,
+        schedule_mode: str = "global",
+        schedule_start: str = "08:00",
+        schedule_end: str = "20:00",
+        schedule_days: Optional[List[int]] = None,
+        standby_by_schedule: bool = False,
     ):
         self.client_id = client_id
         self.ip = ip
-        self.hostname = hostname
-        self.custom_name = custom_name or hostname
+        self.hostname = hostname or client_id
+        self.custom_name = custom_name or self.hostname
         self.os_info = os_info
-        self.screens = screens
+        self.screens = screens if screens is not None else []
         self.primary_screen = primary_screen
         self.audio_enabled = audio_enabled
         self.stream_allowed = stream_allowed
@@ -50,6 +55,11 @@ class ClientDevice:
         self.registered_at = registered_at or time.strftime("%Y-%m-%d %H:%M:%S")
         self.connected_at = connected_at or time.strftime("%Y-%m-%d %H:%M:%S")
         self.last_seen = last_seen if last_seen is not None else time.time()
+        self.schedule_mode = schedule_mode  # "global" | "24/7" | "interval"
+        self.schedule_start = schedule_start
+        self.schedule_end = schedule_end
+        self.schedule_days = schedule_days if schedule_days is not None else [1, 2, 3, 4, 5, 6, 7]
+        self.standby_by_schedule = standby_by_schedule
 
     @property
     def is_online(self) -> bool:
@@ -73,6 +83,61 @@ class ClientDevice:
             return "macos"
         return "unknown"
 
+    def is_in_schedule_window(
+        self,
+        now_dt: Optional[Any] = None,
+        global_schedule: Optional[Any] = None,
+    ) -> bool:
+        """
+        Проверка, попадает ли клиент в активное окно вещания.
+        Возвращает True, если сейчас должен идти эфир, или False, если должен быть чёрный экран.
+        """
+        if self.schedule_mode == "24/7":
+            return True
+
+        from datetime import datetime
+        if now_dt is None:
+            now_dt = datetime.now()
+        now_time = now_dt.time()
+        weekday = now_dt.isoweekday()  # 1=Понедельник, ..., 7=Воскресенье
+
+        if self.schedule_mode == "interval":
+            days = self.schedule_days if self.schedule_days else [1, 2, 3, 4, 5, 6, 7]
+            if weekday not in days:
+                return False
+            return self._is_time_in_range(now_time, self.schedule_start, self.schedule_end)
+
+        # Режим "global" (по умолчанию): наследуем глобальное расписание сервера
+        if global_schedule is not None:
+            mode = getattr(global_schedule, "mode", "24/7")
+            if mode == "24/7":
+                return True
+            days = getattr(global_schedule, "days_of_week", [1, 2, 3, 4, 5, 6, 7]) or [1, 2, 3, 4, 5, 6, 7]
+            if weekday not in days:
+                return False
+            st = getattr(global_schedule, "start_time", "08:00")
+            et = getattr(global_schedule, "end_time", "20:00")
+            return self._is_time_in_range(now_time, st, et)
+
+        return True
+
+    @staticmethod
+    def _is_time_in_range(check_time: Any, start_str: str, end_str: str) -> bool:
+        """Вспомогательный метод проверки вхождения времени в интервал (с поддержкой перехода через полночь)."""
+        try:
+            from datetime import time as dtime
+            sh, sm = map(int, start_str.strip().split(":"))
+            eh, em = map(int, end_str.strip().split(":"))
+            t_start = dtime(sh, sm)
+            t_end = dtime(eh, em)
+            if t_start <= t_end:
+                return t_start <= check_time < t_end
+            else:
+                # Переход через полночь (например, 22:00 -> 06:00)
+                return check_time >= t_start or check_time < t_end
+        except Exception:
+            return True
+
     def to_dict(self) -> Dict[str, Any]:
         """Сериализация в словарь для передачи через REST API и WebSocket."""
         return {
@@ -87,6 +152,11 @@ class ClientDevice:
             "audio_enabled": self.audio_enabled,
             "stream_allowed": self.stream_allowed,
             "standby": self.standby,
+            "schedule_mode": self.schedule_mode,
+            "schedule_start": self.schedule_start,
+            "schedule_end": self.schedule_end,
+            "schedule_days": self.schedule_days,
+            "standby_by_schedule": self.standby_by_schedule,
             "registered_at": self.registered_at,
             "connected_at": self.connected_at,
             "last_seen_seconds_ago": max(0, int(time.time() - self.last_seen)) if self.last_seen > 0 else -1,
@@ -107,6 +177,10 @@ class ClientDevice:
             "audio_enabled": self.audio_enabled,
             "stream_allowed": self.stream_allowed,
             "standby": self.standby,
+            "schedule_mode": self.schedule_mode,
+            "schedule_start": self.schedule_start,
+            "schedule_end": self.schedule_end,
+            "schedule_days": self.schedule_days,
             "registered_at": self.registered_at,
             "last_seen": self.last_seen,
         }
@@ -156,6 +230,10 @@ class ClientManager:
                         connected_at=None,
                         last_seen=0.0,
                         websocket=None,
+                        schedule_mode=item.get("schedule_mode", "global"),
+                        schedule_start=item.get("schedule_start", "08:00"),
+                        schedule_end=item.get("schedule_end", "20:00"),
+                        schedule_days=item.get("schedule_days", [1, 2, 3, 4, 5, 6, 7]),
                     )
                     self._clients[cid] = client
                 logger.info("Загружено сохраненных клиентов: %d", len(self._clients))
@@ -217,6 +295,10 @@ class ClientManager:
                     stream_allowed=data.get("stream_allowed", True),
                     standby=data.get("standby", False),
                     websocket=websocket,
+                    schedule_mode=data.get("schedule_mode", "global"),
+                    schedule_start=data.get("schedule_start", "08:00"),
+                    schedule_end=data.get("schedule_end", "20:00"),
+                    schedule_days=data.get("schedule_days", [1, 2, 3, 4, 5, 6, 7]),
                 )
                 self._clients[client_id] = client
                 logger.info(
@@ -278,6 +360,10 @@ class ClientManager:
         custom_name: str,
         os_info: Optional[str] = "Android",
         screens: Optional[List[str]] = None,
+        schedule_mode: str = "global",
+        schedule_start: str = "08:00",
+        schedule_end: str = "20:00",
+        schedule_days: Optional[List[int]] = None,
     ) -> ClientDevice:
         """
         Ручное добавление устройства в реестр (например, ТВ-приставки или Android-ТВ).
@@ -290,6 +376,14 @@ class ClientManager:
                     existing.custom_name = custom_name.strip()
                 if os_info:
                     existing.os_info = os_info.strip()
+                if schedule_mode:
+                    existing.schedule_mode = schedule_mode
+                if schedule_start:
+                    existing.schedule_start = schedule_start
+                if schedule_end:
+                    existing.schedule_end = schedule_end
+                if schedule_days is not None:
+                    existing.schedule_days = schedule_days
                 self._save_persisted_clients()
                 return existing
 
@@ -312,10 +406,14 @@ class ClientManager:
                 connected_at=None,
                 last_seen=0.0,
                 websocket=None,
+                schedule_mode=schedule_mode,
+                schedule_start=schedule_start,
+                schedule_end=schedule_end,
+                schedule_days=schedule_days,
             )
             self._clients[cid] = client
             self._save_persisted_clients()
-            logger.info("Вручную добавлено устройство [%s] (%s, IP %s, ОС: %s)", cid, custom_name, ip, os_info)
+            logger.info("Вручную добавлено устройство [%s] (%s, IP %s, ОС: %s, Режим: %s)", cid, custom_name, ip, os_info, schedule_mode)
             return client
 
     async def update_client_meta(
@@ -324,8 +422,12 @@ class ClientManager:
         custom_name: Optional[str] = None,
         os_info: Optional[str] = None,
         ip: Optional[str] = None,
+        schedule_mode: Optional[str] = None,
+        schedule_start: Optional[str] = None,
+        schedule_end: Optional[str] = None,
+        schedule_days: Optional[List[int]] = None,
     ) -> bool:
-        """Обновление пользовательского имени, информации об ОС и/или IP клиента."""
+        """Обновление пользовательского имени, информации об ОС, IP и параметров расписания клиента."""
         async with self._lock:
             client = self._clients.get(client_id)
             if not client:
@@ -336,8 +438,43 @@ class ClientManager:
                 client.os_info = os_info.strip()
             if ip is not None and ip.strip():
                 client.ip = ip.strip()
+            if schedule_mode is not None:
+                client.schedule_mode = schedule_mode
+            if schedule_start is not None:
+                client.schedule_start = schedule_start
+            if schedule_end is not None:
+                client.schedule_end = schedule_end
+            if schedule_days is not None:
+                client.schedule_days = schedule_days
             self._save_persisted_clients()
-            logger.info("Метаданные клиента [%s] обновлены: имя='%s', os='%s', ip='%s'", client_id, client.custom_name, client.os_info, client.ip)
+            logger.info("Метаданные клиента [%s] обновлены: имя='%s', os='%s', ip='%s', расписание='%s'", client_id, client.custom_name, client.os_info, client.ip, client.schedule_mode)
+            return True
+
+    async def update_client_schedule(
+        self,
+        client_id: str,
+        schedule_mode: str,
+        schedule_start: Optional[str] = None,
+        schedule_end: Optional[str] = None,
+        schedule_days: Optional[List[int]] = None,
+    ) -> bool:
+        """Специализированное обновление параметров расписания для конкретного клиента."""
+        async with self._lock:
+            client = self._clients.get(client_id)
+            if not client:
+                return False
+            client.schedule_mode = schedule_mode
+            if schedule_start is not None:
+                client.schedule_start = schedule_start
+            if schedule_end is not None:
+                client.schedule_end = schedule_end
+            if schedule_days is not None:
+                client.schedule_days = schedule_days
+            self._save_persisted_clients()
+            logger.info(
+                "Расписание клиента [%s] обновлено: режим=%s, интервал=%s-%s, дни=%s",
+                client_id, schedule_mode, client.schedule_start, client.schedule_end, client.schedule_days
+            )
             return True
 
     async def update_heartbeat(self, client_id: str, data: Optional[Dict[str, Any]] = None) -> None:
