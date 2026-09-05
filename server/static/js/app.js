@@ -1133,7 +1133,9 @@ document.addEventListener('alpine:init', () => {
                 if (res.ok) {
                     if (!this.config.plugins.logo) this.config.plugins.logo = {};
                     this.config.plugins.logo.image_path = data.path;
-                    this.showToast('Файл логотипа успешно загружен', 'success');
+                    this.config.plugins.logo.enabled = true;
+                    this.showToast('Файл логотипа успешно загружен и включен', 'success');
+                    await this.fetchConfig();
                     await this.fetchStatus();
                 } else {
                     this.showToast('Ошибка загрузки: ' + (data.detail || 'Не удалось сохранить файл'), 'error');
@@ -1355,7 +1357,9 @@ document.addEventListener('alpine:init', () => {
                 if (res.ok) {
                     if (!this.config.plugins[pluginName]) this.config.plugins[pluginName] = {};
                     this.config.plugins[pluginName].image_path = data.path;
-                    this.showToast('Изображение баннера успешно загружено', 'success');
+                    this.config.plugins[pluginName].enabled = true;
+                    this.showToast('Изображение баннера успешно загружено и включено', 'success');
+                    await this.fetchConfig();
                     await this.fetchStatus();
                 } else {
                     this.showToast('Ошибка загрузки: ' + (data.detail || 'Не удалось сохранить'), 'error');

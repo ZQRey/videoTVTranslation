@@ -120,6 +120,19 @@ class StreamOrchestrator:
             self._resume_event.set()
         return True
 
+    async def reload_pipeline(self) -> None:
+        """
+        Перезапуск текущего процесса FFmpeg для немедленного применения изменений в фильтрах/плагинах.
+        Не переключает трек вперед (сохраняет текущий файл), а перезапускает его с новым -filter_complex.
+        """
+        logger.info("Запрошено обновление конвейера плагинов: перезапуск текущего трека с новыми фильтрами...")
+        self._manual_switch_requested = True
+        self._skip_requested = False
+        if self.current_process and self.current_process.returncode is None:
+            await self._terminate_current_process()
+        elif self.status == StreamStatus.IDLE:
+            self._resume_event.set()
+
     async def delete_media_file(self, filename: str) -> bool:
         """
         Безопасное удаление файла из папки media.

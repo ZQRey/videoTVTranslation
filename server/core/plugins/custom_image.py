@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from core.config import ConfigManager
+from core.config import BASE_DIR, ConfigManager
 from core.plugins.base import BaseOverlayPlugin
 
 logger = logging.getLogger("stream_server.plugins.custom_image")
@@ -51,11 +51,33 @@ class CustomImageOverlayPlugin(BaseOverlayPlugin):
         merged.update(cfg)
         return merged
 
+    def _resolve_image_path(self, raw_path: str) -> Path:
+        """
+        Разрешает путь к изображению баннера:
+        1. Если абсолютный и существует — возвращает его.
+        2. Если существует относительно BASE_DIR (папки server/) — возвращает его.
+        3. Если существует относительно текущей рабочей директории — возвращает его.
+        4. Иначе возвращает (BASE_DIR / raw_path).resolve().
+        """
+        if not raw_path:
+            return Path("")
+        p = Path(raw_path)
+        if p.is_absolute() and p.exists():
+            return p.resolve()
+        if (BASE_DIR / p).exists():
+            return (BASE_DIR / p).resolve()
+        if p.exists():
+            return p.resolve()
+        return (BASE_DIR / p).resolve()
+
     def is_enabled(self) -> bool:
         cfg = self._get_config()
         if not bool(cfg.get("enabled", False)):
             return False
-        img_path = Path(str(cfg.get("image_path", "")))
+        raw_path = str(cfg.get("image_path", "")).strip()
+        if not raw_path:
+            return False
+        img_path = self._resolve_image_path(raw_path)
         return img_path.exists() and img_path.is_file()
 
     def get_settings_schema(self) -> Dict[str, Any]:
@@ -88,10 +110,11 @@ class CustomImageOverlayPlugin(BaseOverlayPlugin):
         extra_inputs: List[str],
     ) -> Tuple[str, List[str]]:
         cfg = self._get_config()
-        img_path = Path(str(cfg.get("image_path", ""))).resolve()
+        raw_path = str(cfg.get("image_path", ""))
+        img_path = self._resolve_image_path(raw_path)
 
         new_extra_inputs = list(extra_inputs)
-        new_extra_inputs.append(str(img_path))
+        new_extra_inputs.append(str(img_path.resolve()))
 
         input_idx = len(new_extra_inputs)
         scaled_label = f"img_scaled_{input_idx}"

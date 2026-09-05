@@ -958,6 +958,10 @@ async def update_configuration(new_settings: Dict[str, Any]):
     """Обновление глобальных параметров конфигурации сервера."""
     try:
         updated = await config_manager.update_settings(new_settings)
+        # Если обновлены настройки плагинов, обновляем кастомные модули и немедленно перезагружаем FFmpeg
+        if "plugins" in new_settings:
+            plugin_mgr.load_custom_plugins()
+            await streamer.reload_pipeline()
         return {
             "success": True,
             "message": "Конфигурация успешно обновлена",
@@ -981,7 +985,7 @@ async def upload_logo_image(file: UploadFile = File(...)):
             detail="Поддерживаются только изображения форматов PNG, JPG, JPEG, WEBP",
         )
 
-    config_dir = Path("config")
+    config_dir = BASE_DIR / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     target_path = config_dir / f"logo{ext}"
 
@@ -989,16 +993,18 @@ async def upload_logo_image(file: UploadFile = File(...)):
         with open(target_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # Автоматически обновляем путь к логотипу в настройках
+        rel_path = f"config/logo{ext}"
+        # Автоматически обновляем путь к логотипу в настройках и активируем плагин
         await config_manager.update_settings(
-            {"plugins": {"logo": {"image_path": str(target_path)}}}
+            {"plugins": {"logo": {"image_path": rel_path, "enabled": True}}}
         )
 
-        logger.info(f"Загружен новый файл логотипа: {target_path}")
+        logger.info(f"Загружен новый файл логотипа: {target_path} (плагин активирован)")
+        await streamer.reload_pipeline()
         return {
             "success": True,
             "filename": target_path.name,
-            "path": str(target_path),
+            "path": rel_path,
         }
     except Exception as e:
         logger.error(f"Ошибка при сохранении логотипа: {e}")
@@ -1083,6 +1089,7 @@ async def create_visual_plugin(payload: Dict[str, Any]):
             title=title,
             initial_config=cfg,
         )
+        await streamer.reload_pipeline()
         return {
             "success": True,
             "message": f"Визуальный плагин '{name}' успешно создан.",
@@ -1117,6 +1124,7 @@ async def upload_python_plugin(
         plugin = await plugin_mgr.install_python_plugin_code(
             name=plugin_name, code=content
         )
+        await streamer.reload_pipeline()
         return {
             "success": True,
             "message": f"Python-плагин '{plugin_name}' успешно установлен и активирован.",
@@ -1134,6 +1142,7 @@ async def delete_custom_plugin(plugin_name: str):
         success = await plugin_mgr.unregister_custom_plugin(plugin_name)
         if not success:
             raise HTTPException(status_code=404, detail="Плагин не найден.")
+        await streamer.reload_pipeline()
         return {
             "success": True,
             "message": f"Плагин '{plugin_name}' успешно удален.",
@@ -1158,7 +1167,7 @@ async def upload_custom_plugin_image(plugin_name: str, file: UploadFile = File(.
             detail="Поддерживаются только форматы PNG, JPG, JPEG, WEBP",
         )
 
-    img_dir = Path("config/custom_images")
+    img_dir = BASE_DIR / "config" / "custom_images"
     img_dir.mkdir(parents=True, exist_ok=True)
     target_path = img_dir / f"{plugin_name}{ext}"
 
@@ -1166,10 +1175,12 @@ async def upload_custom_plugin_image(plugin_name: str, file: UploadFile = File(.
         with open(target_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
+        rel_path = f"config/custom_images/{plugin_name}{ext}"
         await config_manager.update_settings(
-            {"plugins": {plugin_name: {"image_path": str(target_path)}}}
+            {"plugins": {plugin_name: {"image_path": rel_path, "enabled": True}}}
         )
-        return {"success": True, "path": str(target_path)}
+        await streamer.reload_pipeline()
+        return {"success": True, "path": rel_path}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -6,17 +6,29 @@
 - REST API маршруты управления плагинами.
 """
 
+import io
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.config import ConfigManager
 from core.plugins.custom_filter import CustomFilterOverlayPlugin
 from core.plugins.custom_image import CustomImageOverlayPlugin
 from core.plugins.custom_text import TextTickerOverlayPlugin
+from core.plugins.logo import LogoOverlayPlugin
 from core.plugins.manager import PluginManager
-from main import create_visual_plugin, delete_custom_plugin, get_plugin_templates, upload_python_plugin
+from core.streamer import StreamOrchestrator, StreamStatus
+from fastapi import UploadFile
+from main import (
+    create_visual_plugin,
+    delete_custom_plugin,
+    get_plugin_templates,
+    update_configuration,
+    upload_logo_image,
+    upload_python_plugin,
+)
 
 
 class TestCustomPlugins(unittest.IsolatedAsyncioTestCase):
@@ -139,6 +151,90 @@ class DynamicSepiaPlugin(BaseOverlayPlugin):
         self.assertIn("python_starter", templates)
         self.assertIn("visual_presets", templates)
         self.assertIn("text_ticker", templates["visual_presets"])
+
+    async def test_logo_plugin_resolve_path_and_filter(self):
+        """Проверка корректного разрешения относительных путей логотипа и генерации фильтра."""
+        logo_plugin = LogoOverlayPlugin(self.cfg_mgr)
+
+        # 1. Проверяем разрешение относительного пути config/logo.png
+        resolved = logo_plugin._resolve_image_path("config/logo.png")
+        self.assertTrue(resolved.is_absolute())
+        self.assertTrue(resolved.exists())
+
+        # 2. Включаем плагин
+        await self.cfg_mgr.update_settings({"plugins": {"logo": {"enabled": True}}})
+        self.assertTrue(logo_plugin.is_enabled())
+
+        # 3. Проверяем генерацию фильтра FFmpeg
+        filter_str, extra = logo_plugin.build_filter("0:v", "outv", [])
+        self.assertEqual(len(extra), 1)
+        self.assertEqual(extra[0], str(resolved))
+        self.assertIn("scale=", filter_str)
+        self.assertIn("overlay=", filter_str)
+        self.assertIn("repeatlast=1", filter_str)
+
+    async def test_custom_image_plugin_resolve_path(self):
+        """Проверка разрешения путей в CustomImageOverlayPlugin."""
+        # Создаем временное изображение
+        img_file = Path(self.temp_dir) / "test_banner.png"
+        img_file.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        plugin = CustomImageOverlayPlugin(
+            name="banner",
+            title="Баннер",
+            config_manager=self.cfg_mgr,
+            default_config={"enabled": True, "image_path": str(img_file)},
+        )
+        self.assertTrue(plugin.is_enabled())
+        filter_str, extra = plugin.build_filter("0:v", "outv", [])
+        self.assertEqual(len(extra), 1)
+        self.assertEqual(extra[0], str(img_file.resolve()))
+
+    async def test_streamer_reload_pipeline(self):
+        """Проверка работы метода reload_pipeline() в StreamOrchestrator."""
+        streamer = StreamOrchestrator(self.cfg_mgr, MagicMock(), self.plugin_mgr)
+        streamer.status = StreamStatus.IDLE
+
+        # В состоянии IDLE reload_pipeline должен взводить _resume_event
+        self.assertFalse(streamer._resume_event.is_set())
+        await streamer.reload_pipeline()
+        self.assertTrue(streamer._resume_event.is_set())
+        self.assertTrue(streamer._manual_switch_requested)
+
+        # При наличии активного процесса reload_pipeline должен завершать его
+        mock_proc = AsyncMock()
+        mock_proc.returncode = None
+        streamer.current_process = mock_proc
+        streamer.status = StreamStatus.LIVE
+
+        await streamer.reload_pipeline()
+        self.assertTrue(streamer._manual_switch_requested)
+        mock_proc.terminate.assert_called_once()
+
+    async def test_api_config_triggers_reload(self):
+        """Проверка вызова reload_pipeline при изменении конфигурации плагинов."""
+        with patch("main.streamer.reload_pipeline", new_callable=AsyncMock) as mock_reload, \
+             patch("main.config_manager", self.cfg_mgr):
+            res = await update_configuration({"plugins": {"clock": {"enabled": True}}})
+            self.assertTrue(res.get("success"))
+            mock_reload.assert_awaited_once()
+
+    async def test_api_upload_logo_enables_and_reloads(self):
+        """Проверка автоматической активации логотипа и вызова reload_pipeline при загрузке."""
+        dummy_file = io.BytesIO(b"\x89PNG\r\n\x1a\nfake-logo-bytes")
+        upload_file = UploadFile(file=dummy_file, filename="uploaded_test_logo.png")
+
+        with patch("main.BASE_DIR", Path(self.temp_dir)), \
+             patch("main.streamer.reload_pipeline", new_callable=AsyncMock) as mock_reload, \
+             patch("main.config_manager", self.cfg_mgr):
+            res = await upload_logo_image(file=upload_file)
+            self.assertTrue(res.get("success"))
+            self.assertIn("logo.png", res["path"])
+            mock_reload.assert_awaited_once()
+
+            # Проверяем, что в конфигурации логотип включен
+            settings = self.cfg_mgr.get_settings()
+            self.assertTrue(settings.plugins.logo.enabled)
 
 
 if __name__ == "__main__":
