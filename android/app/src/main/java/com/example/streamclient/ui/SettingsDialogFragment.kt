@@ -50,6 +50,17 @@ class SettingsDialogFragment : DialogFragment() {
         appPreferences = AppPreferences(requireContext())
     }
 
+    override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+        val dialog = super.onCreateDialog(savedInstanceState)
+        dialog.window?.apply {
+            requestFeature(android.view.Window.FEATURE_NO_TITLE)
+            clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+            clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        return dialog
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -75,13 +86,20 @@ class SettingsDialogFragment : DialogFragment() {
                 resources.getDimensionPixelSize(R.dimen.dialog_width_fallback),
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
-            // Гарантируем, что окно диалога перехватывает фокус для пульта ДУ
             clearFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
         }
 
-        // Перехват кнопки Назад для подтверждения выхода при незаданных настройках
+        // Перехват кнопок пульта ДУ на уровне окна диалога
         dialog?.setOnKeyListener { _, keyCode, event ->
-            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val current = dialog?.currentFocus
+                if (current == null) {
+                    focusView(binding.etServerHost)
+                    return@setOnKeyListener true
+                }
+                val handled = handleDpadNavigation(current, keyCode)
+                if (handled) return@setOnKeyListener true
+            } else if (event.action == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_BACK) {
                 val isConfigured = (activity as? MainActivity)?.isCurrentConfigConfigured == true
                 if (!isConfigured) {
                     val now = System.currentTimeMillis()
@@ -101,14 +119,18 @@ class SettingsDialogFragment : DialogFragment() {
             false
         }
 
-        // Запрос начального фокуса после отрисовки окна
+        // Гарантированный начальный фокус на первом поле
         binding.root.post {
-            val host = binding.etServerHost.text?.toString()?.trim().orEmpty()
-            if (host.isEmpty()) {
-                binding.etServerHost.requestFocus()
-            } else {
-                binding.btnSaveConnect.requestFocus()
-            }
+            focusView(binding.etServerHost)
+        }
+    }
+
+    private fun focusView(target: View) {
+        target.isFocusable = true
+        target.isFocusableInTouchMode = true
+        target.requestFocus()
+        binding.scrollView.post {
+            binding.scrollView.requestChildFocus(target, target)
         }
     }
 
@@ -124,14 +146,18 @@ class SettingsDialogFragment : DialogFragment() {
             return
         }
         try {
-            val ft = fragmentManager.beginTransaction()
-            if (existing != null) {
-                ft.remove(existing)
+            show(fragmentManager, tag)
+        } catch (e: IllegalStateException) {
+            try {
+                val ft = fragmentManager.beginTransaction()
+                if (existing != null) {
+                    ft.remove(existing)
+                }
+                ft.add(this, tag)
+                ft.commitAllowingStateLoss()
+            } catch (ex: Exception) {
+                android.util.Log.e(TAG, "Ошибка безопасного показа диалога настроек", ex)
             }
-            ft.add(this, tag)
-            ft.commitAllowingStateLoss()
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Ошибка безопасного показа диалога настроек", e)
         }
     }
 
@@ -234,7 +260,7 @@ class SettingsDialogFragment : DialogFragment() {
     }
 
     /**
-     * Комплексная настройка навигации стрелками пульта ДУ (D-Pad) для текстовых полей и автоскролла.
+     * Комплексная настройка навигации стрелками пульта ДУ (D-Pad) для всех элементов управления.
      */
     private fun setupDpadNavigation() {
         val editTexts = listOf(
@@ -246,83 +272,35 @@ class SettingsDialogFragment : DialogFragment() {
         )
 
         for (et in editTexts) {
+            et.isFocusable = true
+            et.isFocusableInTouchMode = true
             et.setOnKeyListener { v, keyCode, event ->
                 if (event.action == KeyEvent.ACTION_DOWN) {
                     when (keyCode) {
-                        KeyEvent.KEYCODE_DPAD_DOWN -> {
-                            val nextId = v.nextFocusDownId
-                            if (nextId != View.NO_ID) {
-                                binding.root.findViewById<View>(nextId)?.requestFocus()
-                                return@setOnKeyListener true
-                            }
-                        }
-                        KeyEvent.KEYCODE_DPAD_UP -> {
-                            val prevId = v.nextFocusUpId
-                            if (prevId != View.NO_ID) {
-                                binding.root.findViewById<View>(prevId)?.requestFocus()
-                                return@setOnKeyListener true
-                            }
-                        }
-                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                            val etView = v as? EditText
-                            if (etView == null || etView.selectionEnd >= (etView.text?.length ?: 0)) {
-                                val rightId = v.nextFocusRightId
-                                if (rightId != View.NO_ID) {
-                                    binding.root.findViewById<View>(rightId)?.requestFocus()
-                                    return@setOnKeyListener true
-                                }
-                            }
-                        }
-                        KeyEvent.KEYCODE_DPAD_LEFT -> {
-                            val etView = v as? EditText
-                            if (etView == null || etView.selectionStart <= 0) {
-                                val leftId = v.nextFocusLeftId
-                                if (leftId != View.NO_ID) {
-                                    binding.root.findViewById<View>(leftId)?.requestFocus()
-                                    return@setOnKeyListener true
-                                }
-                            }
-                        }
                         KeyEvent.KEYCODE_ENTER,
-                        KeyEvent.KEYCODE_DPAD_CENTER -> {
-                            // Открытие экранной клавиатуры для ввода
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER -> {
                             val imm = v.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                             imm?.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                            return@setOnKeyListener true
                         }
+                    }
+                    if (handleDpadNavigation(v, keyCode)) {
+                        return@setOnKeyListener true
                     }
                 }
                 false
             }
 
-            // Автоматическая прокрутка ScrollView при фокусе элемента
             et.setOnFocusChangeListener { v, hasFocus ->
                 if (hasFocus) {
-                    binding.scrollView.requestChildFocus(v, v)
+                    binding.scrollView.post {
+                        binding.scrollView.requestChildFocus(v, v)
+                    }
                 }
             }
         }
 
-        // Поддержка кнопок пульта OK / DPAD_CENTER для мгновенного выбора RadioButton
-        val radioButtons = listOf(
-            binding.rbRtsp,
-            binding.rbHls,
-            binding.rbSchedGlobal,
-            binding.rbSched247,
-            binding.rbSchedInterval
-        )
-        for (rb in radioButtons) {
-            rb.setOnKeyListener { v, keyCode, event ->
-                if (event.action == KeyEvent.ACTION_DOWN &&
-                    (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
-                ) {
-                    (v as? android.widget.RadioButton)?.isChecked = true
-                    return@setOnKeyListener true
-                }
-                false
-            }
-        }
-
-        // Автоскролл для остальных элементов управления
         val otherFocusables = listOf(
             binding.rbRtsp,
             binding.rbHls,
@@ -334,12 +312,269 @@ class SettingsDialogFragment : DialogFragment() {
         )
 
         for (item in otherFocusables) {
+            item.isFocusable = true
+            item.isFocusableInTouchMode = true
             item.setOnFocusChangeListener { v, hasFocus ->
                 if (hasFocus) {
-                    binding.scrollView.requestChildFocus(v, v)
+                    binding.scrollView.post {
+                        binding.scrollView.requestChildFocus(v, v)
+                    }
+                }
+            }
+            item.setOnKeyListener { v, keyCode, event ->
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    if (handleDpadNavigation(v, keyCode)) {
+                        return@setOnKeyListener true
+                    }
+                }
+                false
+            }
+        }
+    }
+
+    /**
+     * Прямой детерминированный обработчик перемещения фокуса пульта ДУ (D-Pad).
+     * Гарантирует надежный отклик на всех моделях пультов Android TV.
+     */
+    private fun handleDpadNavigation(focused: View, keyCode: Int): Boolean {
+        val isInterval = binding.rgScheduleMode.checkedRadioButtonId == R.id.rbSchedInterval
+
+        when (focused.id) {
+            R.id.etServerHost -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.rbRtsp)
+                        return true
+                    }
+                }
+            }
+
+            R.id.rbRtsp -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.etServerHost)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.rbHls)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        binding.rbRtsp.isChecked = true
+                        return true
+                    }
+                }
+            }
+
+            R.id.rbHls -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbRtsp)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.etPort)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        binding.rbHls.isChecked = true
+                        return true
+                    }
+                }
+            }
+
+            R.id.etPort -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbHls)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.rbSchedGlobal)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        val et = focused as? EditText
+                        if (et == null || et.selectionEnd >= (et.text?.length ?: 0)) {
+                            focusView(binding.etStreamPath)
+                            return true
+                        }
+                    }
+                }
+            }
+
+            R.id.etStreamPath -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbHls)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.rbSchedGlobal)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        val et = focused as? EditText
+                        if (et == null || et.selectionStart <= 0) {
+                            focusView(binding.etPort)
+                            return true
+                        }
+                    }
+                }
+            }
+
+            R.id.rbSchedGlobal -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.etPort)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.rbSched247)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        binding.rbSchedGlobal.isChecked = true
+                        return true
+                    }
+                }
+            }
+
+            R.id.rbSched247 -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbSchedGlobal)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.rbSchedInterval)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        binding.rbSched247.isChecked = true
+                        return true
+                    }
+                }
+            }
+
+            R.id.rbSchedInterval -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbSched247)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        if (isInterval) {
+                            focusView(binding.etScheduleStart)
+                        } else {
+                            focusView(binding.btnCancel)
+                        }
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        binding.rbSchedInterval.isChecked = true
+                        return true
+                    }
+                }
+            }
+
+            R.id.etScheduleStart -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbSchedInterval)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.btnCancel)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        val et = focused as? EditText
+                        if (et == null || et.selectionEnd >= (et.text?.length ?: 0)) {
+                            focusView(binding.etScheduleEnd)
+                            return true
+                        }
+                    }
+                }
+            }
+
+            R.id.etScheduleEnd -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        focusView(binding.rbSchedInterval)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> {
+                        focusView(binding.btnSaveConnect)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        val et = focused as? EditText
+                        if (et == null || et.selectionStart <= 0) {
+                            focusView(binding.etScheduleStart)
+                            return true
+                        }
+                    }
+                }
+            }
+
+            R.id.btnCancel -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        if (isInterval) {
+                            focusView(binding.etScheduleStart)
+                        } else {
+                            focusView(binding.rbSchedInterval)
+                        }
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        focusView(binding.btnSaveConnect)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        dismiss()
+                        return true
+                    }
+                }
+            }
+
+            R.id.btnSaveConnect -> {
+                when (keyCode) {
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        if (isInterval) {
+                            focusView(binding.etScheduleEnd)
+                        } else {
+                            focusView(binding.rbSchedInterval)
+                        }
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        focusView(binding.btnCancel)
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                        saveAndConnect()
+                        return true
+                    }
                 }
             }
         }
+        return false
     }
 
     private fun updatePreview() {
