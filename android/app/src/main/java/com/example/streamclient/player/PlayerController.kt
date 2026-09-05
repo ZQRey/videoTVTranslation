@@ -73,9 +73,12 @@ class PlayerController(
             .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
             .build()
 
+        // Отключаем аппаратные PlaybackParams в AudioTrack: на Android TV вендорские драйверы (HAL)
+        // при аппаратном изменении параметров вызывают треск, шумы и щелчки.
+        // ExoPlayer использует собственный программный процессор Sonic без искажений.
         val renderersFactory = DefaultRenderersFactory(context)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
-            .setEnableAudioTrackPlaybackParams(true)
+            .setEnableAudioTrackPlaybackParams(false)
 
         val player = ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(loadControl)
