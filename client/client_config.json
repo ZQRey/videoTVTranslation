@@ -1,0 +1,6 @@
+{
+  "server_host": "127.0.0.1",
+  "rtsp_port": 8554,
+  "stream_path": "live",
+  "network_caching": 1000
+}

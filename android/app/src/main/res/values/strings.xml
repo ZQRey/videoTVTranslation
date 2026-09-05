@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StreamClient TV</string>
+    <string name="app_subtitle">Клиент непрерывного вещания RTSP / HLS</string>
+
+    <!-- Настройки -->
+    <string name="settings_title">Параметры подключения</string>
+    <string name="settings_subtitle">Укажите сетевой адрес медиасервера трансляции</string>
+    <string name="server_host_label">IP-адрес или доменное имя сервера:</string>
+    <string name="server_host_hint">Например: 192.168.1.100 или tv.local</string>
+    <string name="stream_protocol_label">Протокол вещания:</string>
+    <string name="protocol_rtsp">RTSP (Порт 8554, TCP поток)</string>
+    <string name="protocol_hls">HLS (Порт 8888, HTTP плейлист)</string>
+    <string name="rtsp_port_label">RTSP Порт:</string>
+    <string name="hls_port_label">HLS Порт:</string>
+    <string name="stream_path_label">Путь потока:</string>
+    <string name="btn_connect">Подключиться / Сохранить</string>
+    <string name="btn_cancel">Отмена</string>
+    <string name="btn_settings">Настройки</string>
+    <string name="btn_retry">Повторить сейчас</string>
+
+    <!-- Статусы плеера -->
+    <string name="status_idle">Ожидание настройки потока</string>
+    <string name="status_connecting">Подключение к стриму…</string>
+    <string name="status_playing">ПРЯМОЙ ЭФИР</string>
+    <string name="status_error_title">Потеряно соединение с сервером</string>
+    <string name="status_reconnecting_format">Повторное подключение через %d сек…</string>
+    <string name="error_empty_host">Пожалуйста, укажите корректный IP-адрес сервера</string>
+
+    <!-- Подсказки пульта ДУ -->
+    <string name="tv_remote_hint">Нажмите [Назад] на пульте ДУ для открытия настроек</string>
+</resources>

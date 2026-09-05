@@ -1,0 +1,98 @@
+# ==========================================
+# Python & Bytecode
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Testing & Caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# ==========================================
+# Virtual Environments
+# ==========================================
+.venv/
+*/.venv/
+venv/
+*/venv/
+env/
+*/env/
+ENV/
+
+# ==========================================
+# IDE & System Files
+# ==========================================
+.idea/
+*/.idea/
+.vscode/
+*/.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ==========================================
+# Android & Gradle
+# ==========================================
+.gradle/
+*/.gradle/
+android/.gradle/
+android/.idea/
+android/app/build/
+android/build/
+android/local.properties
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+*.keystore
+!android/gradle/wrapper/gradle-wrapper.jar
+!android/gradle/wrapper/gradle-wrapper.properties
+
+# ==========================================
+# Server Data & Secrets
+# ==========================================
+server/logs/*
+!server/logs/.gitkeep
+
+server/media/*
+!server/media/.gitkeep
+
+server/config/.secret.key
+server/config/settings.json
+server/config/clients.json
+
+server/auto.crt
+server/auto.key
+
+# Custom plugins keep
+!server/plugins_custom/.gitkeep

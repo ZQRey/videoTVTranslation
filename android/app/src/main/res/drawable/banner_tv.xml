@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Фон баннера с градиентом -->
+    <path
+        android:fillColor="#0B0F19"
+        android:pathData="M0,0h320v180h-320z"/>
+
+    <!-- Акцентный контур -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M8,8h304v164h-304z"/>
+
+    <!-- Иконка монитора / ТВ в центре -->
+    <path
+        android:fillColor="#10B981"
+        android:pathData="M190,60L130,60c-5.5,0 -10,4.5 -10,10v40c0,5.5 4.5,10 10,10h18v6h-10v6h44v-6h-10v-6h18c5.5,0 10,-4.5 10,-10L200,70c0,-5.5 -4.5,-10 -10,-10zM192,112L128,112L128,68h64v44z"/>
+</vector>

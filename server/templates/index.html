@@ -1,0 +1,1737 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stream Server — Панель управления вещанием</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            500: '#10b981',
+                            600: '#059669',
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'Courier New', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Alpine.js CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Client Application Logic -->
+    <script src="/static/js/app.js"></script>
+    <style>
+        /* Стилизация скроллбара */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+    </style>
+</head>
+<body class="bg-[#0b0f19] text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-emerald-500 selection:text-black" x-data="streamApp">
+
+    <!-- Верхняя панель навигации -->
+    <header class="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-md sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-base font-semibold tracking-tight text-white flex items-center gap-2">
+                        StreamServer
+                        <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700 font-mono">v1.0</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">Сервер непрерывного вещания MediaMTX & FFmpeg</p>
+                </div>
+            </div>
+
+            <!-- Индикаторы статуса, пользователь и WebSocket -->
+            <div class="flex items-center space-x-4">
+                <div class="flex items-center space-x-2 text-xs">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full" :class="wsConnected ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-rose-500 animate-ping'"></span>
+                    <span class="text-slate-400" x-text="wsConnected ? 'WebSocket онлайн' : 'Переподключение...'"></span>
+                </div>
+
+                <!-- Главный статус вещания -->
+                <div class="px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider flex items-center gap-2" :class="getStatusBadgeClass(telemetry.streamer.status)">
+                    <span class="w-2 h-2 rounded-full" :class="telemetry.streamer.status === 'LIVE' ? 'bg-emerald-400 animate-pulse' : (telemetry.streamer.status === 'CRITICAL_ERROR' ? 'bg-rose-400 animate-ping' : 'bg-amber-400')"></span>
+                    <span x-text="telemetry.streamer.status"></span>
+                </div>
+
+                <!-- Профиль пользователя и кнопка выхода -->
+                <div class="flex items-center pl-3 border-l border-slate-800 space-x-3 text-xs" x-show="currentUser.username">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-white shadow-sm"
+                             :class="currentUser.auth_type === 'domain' ? 'bg-blue-600/30 text-blue-400 border border-blue-500/40' : 'bg-emerald-600/30 text-emerald-400 border border-emerald-500/40'">
+                            <span x-text="currentUser.username.charAt(0).toUpperCase()"></span>
+                        </div>
+                        <div class="hidden sm:block text-left">
+                            <div class="text-slate-200 font-medium leading-none flex items-center gap-1.5">
+                                <span x-text="currentUser.display_name || currentUser.username"></span>
+                            </div>
+                            <div class="text-[10px] text-slate-400 leading-none mt-1 flex items-center gap-1">
+                                <span class="inline-block w-1.5 h-1.5 rounded-full" :class="currentUser.auth_type === 'domain' ? 'bg-blue-400' : 'bg-emerald-400'"></span>
+                                <span x-text="currentUser.auth_type === 'domain' ? 'Администратор домена' : 'Администратор сайта'"></span>
+                            </div>
+                        </div>
+                    </div>
+                    <button @click="logout()" title="Выйти из системы" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 border border-slate-700/60 transition">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладки навигации -->
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-6 text-sm font-medium">
+            <button @click="activeTab = 'dashboard'" :class="activeTab === 'dashboard' ? 'border-emerald-500 text-emerald-400 border-b-2 py-3' : 'text-slate-400 hover:text-slate-200 py-3 transition'">
+                Дашборд и Плеер
+            </button>
+            <button @click="activeTab = 'clients'" :class="activeTab === 'clients' ? 'border-emerald-500 text-emerald-400 border-b-2 py-3 flex items-center gap-2' : 'text-slate-400 hover:text-slate-200 py-3 transition flex items-center gap-2'">
+                Клиенты
+                <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono"
+                      :class="(clientsData.total_connected || 0) > 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'"
+                      x-text="`${clientsData.total_connected || 0}/${(clientsData.clients ? clientsData.clients.length : 0)}`"></span>
+            </button>
+            <button @click="activeTab = 'plugins'" :class="activeTab === 'plugins' ? 'border-emerald-500 text-emerald-400 border-b-2 py-3' : 'text-slate-400 hover:text-slate-200 py-3 transition'">
+                Оверлеи и Плагины
+            </button>
+            <button @click="activeTab = 'settings'" :class="activeTab === 'settings' ? 'border-emerald-500 text-emerald-400 border-b-2 py-3' : 'text-slate-400 hover:text-slate-200 py-3 transition'">
+                Настройки
+            </button>
+            <button @click="activeTab = 'logs'" :class="activeTab === 'logs' ? 'border-emerald-500 text-emerald-400 border-b-2 py-3' : 'text-slate-400 hover:text-slate-200 py-3 transition'">
+                Живые логи
+                <span class="ml-1.5 px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono" x-text="logs.length"></span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Главный контейнер содержимого -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+        <!-- Аварийное предупреждение при сработке Circuit Breaker -->
+        <div x-show="telemetry.streamer.status === 'CRITICAL_ERROR'" x-cloak class="mb-6 bg-rose-950/40 border border-rose-500/50 rounded-xl p-4 flex items-center justify-between shadow-lg shadow-rose-950/20 animate-pulse">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 rounded-lg bg-rose-500/20 text-rose-400">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                </div>
+                <div>
+                    <h3 class="text-sm font-semibold text-rose-300">Авария вещания: сработал Circuit Breaker</h3>
+                    <p class="text-xs text-rose-400/80">Зафиксировано 10 сбоев подряд. Трансляция остановлена для предотвращения циклической перегрузки сервера.</p>
+                </div>
+            </div>
+            <button @click="resetBreaker()" :disabled="actionLoading" class="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow transition flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                Сбросить аварию и возобновить
+            </button>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- ВКЛАДКА 1: ДАШБОРД И ПЛЕЕР -->
+        <!-- ============================================================= -->
+        <div x-show="activeTab === 'dashboard'" class="space-y-6">
+
+            <!-- Верхняя строка карточек дашборда -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+                <!-- Карточка 1: Сейчас в эфире -->
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                        <span class="uppercase tracking-wider font-semibold">Текущий трек</span>
+                        <span class="inline-flex items-center gap-1 text-emerald-400 font-mono" x-show="telemetry.streamer.status === 'LIVE'">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                            В эфире
+                        </span>
+                    </div>
+                    <div class="flex items-center space-x-3 mt-1">
+                        <div class="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 flex-shrink-0">
+                            <svg class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <div class="overflow-hidden">
+                            <h4 class="text-sm font-medium text-white truncate" x-text="telemetry.streamer.current_file || 'Нет воспроизводимого файла'"></h4>
+                            <p class="text-xs text-slate-400 font-mono mt-0.5" x-text="telemetry.playlist.current_index >= 0 ? `Позиция: ${telemetry.playlist.current_index + 1} из ${telemetry.playlist.total}` : 'Очередь пуста'"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Карточка 2: Очередь воспроизведения -->
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                        <span class="uppercase tracking-wider font-semibold">Очередь видеофайлов</span>
+                        <span class="text-xs text-slate-400 font-mono" x-text="`Папка: ${config.media_dir}`"></span>
+                    </div>
+                    <div class="flex items-baseline space-x-2 mt-1">
+                        <span class="text-2xl font-bold text-white font-mono" x-text="telemetry.playlist.total"></span>
+                        <span class="text-xs text-slate-400">файлов найдено</span>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">Новые файлы вставляются сразу за текущим</p>
+                </div>
+
+                <!-- Карточка 3: Предохранитель сбоев (Circuit Breaker) -->
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm">
+                    <div class="flex items-center justify-between text-xs text-slate-400 mb-2">
+                        <span class="uppercase tracking-wider font-semibold">Счетчик сбоев</span>
+                        <span class="font-mono text-xs" :class="telemetry.streamer.consecutive_errors > 0 ? 'text-amber-400' : 'text-slate-500'" x-text="`${telemetry.streamer.consecutive_errors} / ${telemetry.streamer.max_consecutive_errors}`"></span>
+                    </div>
+                    <!-- Прогресс-бар ошибок -->
+                    <div class="w-full bg-slate-800 rounded-full h-2 mt-2 overflow-hidden">
+                        <div class="h-2 rounded-full transition-all duration-300" :class="telemetry.streamer.consecutive_errors >= 8 ? 'bg-rose-500' : (telemetry.streamer.consecutive_errors > 0 ? 'bg-amber-500' : 'bg-emerald-500')" :style="`width: ${(telemetry.streamer.consecutive_errors / telemetry.streamer.max_consecutive_errors) * 100}%`"></div>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">Сброс в 0 при успешном вещании >15 сек</p>
+                </div>
+            </div>
+
+            <!-- Панель управления и действий -->
+            <div class="bg-slate-900/40 border border-slate-800/80 rounded-xl p-5 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center space-x-3">
+                    <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Быстрые действия:</span>
+                    <button @click="previousTrack()" :disabled="actionLoading" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 shadow-sm transition flex items-center gap-1.5" title="Перейти к предыдущему видео">
+                        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
+                        Предыдущий трек
+                    </button>
+                    <button @click="skipTrack()" :disabled="actionLoading" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 shadow-sm transition flex items-center gap-1.5" title="Пропустить текущее видео">
+                        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+                        Следующий трек
+                    </button>
+                    <button @click="triggerScan()" :disabled="actionLoading" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 shadow-sm transition flex items-center gap-1.5">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                        Принудительно сканировать папку
+                    </button>
+                    <button @click="resetBreaker()" :disabled="actionLoading" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 shadow-sm transition flex items-center gap-1.5">
+                        <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        Сбросить счетчик ошибок
+                    </button>
+                </div>
+                <!-- Адрес целевого потока -->
+                <div class="text-xs text-slate-400 font-mono bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800/80 flex items-center gap-2">
+                    <span class="text-slate-500">RTSP Цель:</span>
+                    <span class="text-emerald-400" x-text="telemetry.streamer.target_rtsp_url"></span>
+                </div>
+            </div>
+
+            <!-- Список файлов в очереди -->
+            <div class="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                    <div>
+                        <h3 class="text-sm font-semibold text-white">Список воспроизведения (Динамическая очередь)</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Управляйте очерёдностью, запускайте треки вручную или удаляйте файлы</p>
+                    </div>
+                    <span class="text-xs text-slate-400 font-mono" x-text="`Всего: ${telemetry.playlist.total}`"></span>
+                </div>
+                <div class="divide-y divide-slate-800/60 max-h-96 overflow-y-auto">
+                    <template x-for="(item, index) in telemetry.playlist.items" :key="item">
+                        <div class="px-5 py-2.5 flex items-center justify-between text-xs transition" :class="index === telemetry.playlist.current_index ? 'bg-emerald-500/10 text-emerald-300 font-medium' : 'text-slate-300 hover:bg-slate-800/30'">
+                            <div class="flex items-center space-x-3 min-w-0 pr-4">
+                                <span class="font-mono text-slate-500 w-6 flex-shrink-0" x-text="index + 1"></span>
+                                <span x-text="item" class="truncate font-mono" :class="index === telemetry.playlist.current_index ? 'text-emerald-300 font-semibold' : 'text-slate-300'"></span>
+                                <span x-show="index === telemetry.playlist.current_index" class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold uppercase flex-shrink-0">В эфире</span>
+                                <span x-show="index === (telemetry.playlist.current_index + 1) % telemetry.playlist.total && telemetry.playlist.total > 1" class="px-2 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] flex-shrink-0">Следующий</span>
+                            </div>
+
+                            <!-- Кнопки управления треком -->
+                            <div class="flex items-center space-x-1.5 flex-shrink-0">
+                                <!-- Принудительный запуск -->
+                                <button @click="playTrack(item)" :disabled="actionLoading || index === telemetry.playlist.current_index" class="px-2 py-1 rounded bg-slate-800 hover:bg-emerald-600/30 text-emerald-400 hover:text-emerald-300 disabled:opacity-30 disabled:pointer-events-none transition flex items-center gap-1 text-[11px]" title="Запустить это видео прямо сейчас">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /></svg>
+                                    <span>Запустить</span>
+                                </button>
+
+                                <!-- Переместить вверх -->
+                                <button @click="moveTrack(index, index - 1)" :disabled="actionLoading || index === 0" class="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition" title="Переместить выше в очереди">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
+                                </button>
+
+                                <!-- Переместить вниз -->
+                                <button @click="moveTrack(index, index + 1)" :disabled="actionLoading || index === telemetry.playlist.total - 1" class="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition" title="Переместить ниже в очереди">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                                </button>
+
+                                <!-- Переименовать файл -->
+                                <button @click="openRenameModal(item)" :disabled="actionLoading" class="p-1 rounded bg-slate-800 hover:bg-cyan-600/30 text-cyan-400 hover:text-cyan-300 disabled:opacity-30 disabled:pointer-events-none transition" title="Переименовать файл">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                </button>
+
+                                <!-- Удалить файл -->
+                                <button @click="deleteFile(item)" :disabled="actionLoading" class="p-1 rounded bg-slate-800 hover:bg-rose-600/30 text-rose-400 hover:text-rose-300 disabled:opacity-30 disabled:pointer-events-none transition ml-1" title="Удалить файл из папки media">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="!telemetry.playlist.items || telemetry.playlist.items.length === 0" class="px-5 py-8 text-center text-xs text-slate-500">
+                        Файлы в медиа-папке не найдены. Поместите поддерживаемые видеофайлы (.mp4, .mkv, .avi, etc.) в папку <span class="font-mono text-slate-400" x-text="config.media_dir"></span> и нажмите «Принудительно сканировать папку».
+                    </div>
+                </div>
+            </div>
+
+            <!-- Карточка: Клиентские устройства вещания и управление -->
+            <div class="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-semibold text-white">Клиентские устройства вещания</h3>
+                            <p class="text-xs text-slate-400 mt-0.5">Управление физическими мониторами/ПК: имя, вещание, спящий режим (Standby) и звук</p>
+                        </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs text-slate-400 font-mono mr-2" x-text="`В сети: ${clientsData.total_connected || 0} из ${(clientsData.clients ? clientsData.clients.length : 0)}`"></span>
+                        <button @click="toggleAllStream(true)" :disabled="actionLoading" class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-900/40 transition flex items-center gap-1" title="Разрешить вещание для всех">
+                            <span>📺 Включить всем</span>
+                        </button>
+                        <button @click="toggleAllStream(false)" :disabled="actionLoading" class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-rose-950/40 text-rose-300 border border-rose-500/30 hover:bg-rose-900/40 transition flex items-center gap-1" title="Запретить вещание для всех">
+                            <span>⛔ Стоп всем</span>
+                        </button>
+                        <button @click="toggleAllStandby(true)" :disabled="actionLoading" class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-purple-950/40 text-purple-300 border border-purple-500/30 hover:bg-purple-900/40 transition flex items-center gap-1" title="Перевести все устройства в спящий режим (черный экран)">
+                            <span>🌙 Все в Standby</span>
+                        </button>
+                        <button @click="toggleAllAudio(!clientsData.global_audio_enabled)" :disabled="actionLoading || (clientsData.total_connected || 0) === 0" class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1 border" :class="clientsData.global_audio_enabled ? 'bg-amber-950/40 text-amber-300 border-amber-500/30 hover:bg-amber-900/40' : 'bg-emerald-950/40 text-emerald-300 border-emerald-500/30 hover:bg-emerald-900/40'">
+                            <span x-text="clientsData.global_audio_enabled ? '🔇 Заглушить звук' : '🔊 Включить звук'"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="divide-y divide-slate-800/60 max-h-[500px] overflow-y-auto">
+                    <template x-for="client in (clientsData.clients || [])" :key="client.client_id">
+                        <div class="px-5 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs transition"
+                             :class="client.is_online ? 'hover:bg-slate-800/20' : 'bg-slate-950/30 opacity-75 hover:opacity-100'">
+
+                            <!-- Левая колонка: Имя, Сеть, Мониторы, Статус -->
+                            <div class="flex items-start space-x-3.5 min-w-0 flex-1">
+                                <!-- Индикатор онлайн / офлайн -->
+                                <div class="mt-1 flex-shrink-0 flex items-center justify-center">
+                                    <span class="relative flex h-2.5 w-2.5">
+                                        <span x-show="client.is_online" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-2.5 w-2.5"
+                                              :class="client.is_online ? 'bg-emerald-500' : 'bg-slate-600'"></span>
+                                    </span>
+                                </div>
+
+                                <div class="min-w-0 flex-1">
+                                    <!-- Инлайн редактирование имени или отображение -->
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <!-- Режим редактирования -->
+                                        <template x-if="editingClientId === client.client_id">
+                                            <div class="flex items-center gap-1.5">
+                                                <input type="text"
+                                                       x-model="editingClientName"
+                                                       @keydown.enter="saveClientName(client.client_id)"
+                                                       @keydown.escape="cancelEditClient()"
+                                                       class="px-2 py-0.5 bg-slate-950 text-white font-medium rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs w-52"
+                                                       placeholder="Понятное имя устройства...">
+                                                <button @click="saveClientName(client.client_id)" :disabled="actionLoading" class="p-1 text-emerald-400 hover:text-emerald-300 hover:bg-slate-800 rounded transition" title="Сохранить имя">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                                </button>
+                                                <button @click="cancelEditClient()" class="p-1 text-slate-400 hover:text-slate-300 hover:bg-slate-800 rounded transition" title="Отмена">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </div>
+                                        </template>
+
+                                        <!-- Режим просмотра -->
+                                        <template x-if="editingClientId !== client.client_id">
+                                            <div class="flex items-center gap-1.5 group">
+                                                <span class="font-semibold text-white text-sm" x-text="client.custom_name || client.hostname"></span>
+                                                <button @click="startEditClient(client)" class="text-slate-500 hover:text-emerald-400 transition p-0.5 rounded opacity-60 group-hover:opacity-100" title="Переименовать устройство">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                </button>
+                                            </div>
+                                        </template>
+
+                                        <!-- Бейджи сети и статуса -->
+                                        <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-mono border border-slate-700/60" x-text="client.hostname"></span>
+                                        <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px] font-mono" x-text="client.ip"></span>
+                                        <span class="px-1.5 py-0.5 rounded text-[10px]"
+                                              :class="client.is_online ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'"
+                                              x-text="client.is_online ? 'В сети' : 'Офлайн'"></span>
+                                        <!-- Бейдж операционной системы с иконкой (Windows, Linux, Android) -->
+                                        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium border"
+                                              :class="{
+                                                  'bg-sky-500/10 text-sky-400 border-sky-500/30': client.os_family === 'windows',
+                                                  'bg-amber-500/10 text-amber-400 border-amber-500/30': client.os_family === 'linux',
+                                                  'bg-emerald-500/10 text-emerald-400 border-emerald-500/30': client.os_family === 'android',
+                                                  'bg-slate-800 text-slate-300 border-slate-700': !['windows', 'linux', 'android'].includes(client.os_family)
+                                              }"
+                                              :title="`ОС: ${client.os_info || client.os_family || 'Неизвестно'}`">
+                                            <!-- Windows Logo -->
+                                            <template x-if="client.os_family === 'windows'">
+                                                <svg class="w-3 h-3 text-sky-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/>
+                                                </svg>
+                                            </template>
+                                            <!-- Linux Logo -->
+                                            <template x-if="client.os_family === 'linux'">
+                                                <svg class="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M12.002 0c-2.484 0-4.5 2.016-4.5 4.5 0 .584.116 1.14.324 1.652C6.182 6.942 5 8.784 5 10.902c0 1.344.474 2.58 1.266 3.55C5.474 15.42 5 16.656 5 18c0 3.314 3.134 6 7 6s7-2.686 7-6c0-1.344-.474-2.58-1.266-3.548.792-.97 1.266-2.206 1.266-3.55 0-2.118-1.182-3.96-2.824-4.75.208-.512.324-1.068.324-1.652 0-2.484-2.016-4.5-4.498-4.5z"/>
+                                                </svg>
+                                            </template>
+                                            <!-- Android Logo -->
+                                            <template x-if="client.os_family === 'android'">
+                                                <svg class="w-3 h-3 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5896 8.4239 13.8566 8.0838 12 8.0838s-3.5896.3401-5.1368.8659L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+                                                </svg>
+                                            </template>
+                                            <!-- Other / Desktop -->
+                                            <template x-if="!['windows', 'linux', 'android'].includes(client.os_family)">
+                                                <svg class="w-3 h-3 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                                </svg>
+                                            </template>
+                                            <span x-text="client.os_info || (client.os_family ? client.os_family.toUpperCase() : 'ОС')"></span>
+                                        </span>
+                                    </div>
+
+                                    <!-- Детали экранов и телеметрии -->
+                                    <div class="text-[11px] text-slate-400 mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-slate-500">Экраны:</span>
+                                            <span class="text-slate-300 font-mono" x-text="(client.screens && client.screens.length > 0) ? client.screens.join(', ') : '1 монитор'"></span>
+                                        </div>
+                                        <span class="text-slate-700">•</span>
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-slate-500">Основной (со звуком):</span>
+                                            <span class="text-emerald-400 font-mono" x-text="client.primary_screen || 'Primary'"></span>
+                                        </div>
+                                        <template x-if="client.registered_at">
+                                            <span class="text-slate-700">•</span>
+                                        </template>
+                                        <template x-if="client.registered_at">
+                                            <span class="text-slate-500 font-mono text-[10px]" x-text="`Рег: ${client.registered_at}`"></span>
+                                        </template>
+                                        <template x-if="!client.is_online && client.last_seen_seconds_ago > 0">
+                                            <span class="text-amber-400/80 font-mono text-[10px]" x-text="`Был в сети: ${Math.round(client.last_seen_seconds_ago / 60)} мин назад`"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Правая колонка: Органы управления устройством -->
+                            <div class="flex flex-wrap items-center gap-2 flex-shrink-0 w-full md:w-auto justify-start md:justify-end">
+
+                                <!-- 1. Вещание (Разрешить / Запретить) -->
+                                <button @click="toggleClientStream(client.client_id, client.stream_allowed)"
+                                        :disabled="actionLoading"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border"
+                                        :class="client.stream_allowed ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/40' : 'bg-rose-950/40 text-rose-300 border-rose-500/40 hover:bg-rose-900/40'"
+                                        :title="client.stream_allowed ? 'Вещание разрешено. Нажмите для запрета' : 'Вещание запрещено. Нажмите для включения'">
+                                    <span class="w-1.5 h-1.5 rounded-full" :class="client.stream_allowed ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                                    <span x-text="client.stream_allowed ? 'Вещание: ВКЛ' : 'Вещание: ЗАПРЕТ'"></span>
+                                </button>
+
+                                <!-- 2. Формальное выключение (Standby - черный экран и mute) -->
+                                <button @click="toggleClientStandby(client.client_id, client.standby)"
+                                        :disabled="actionLoading"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border"
+                                        :class="client.standby ? 'bg-purple-950/60 text-purple-300 border-purple-500/50 hover:bg-purple-900/50 shadow-sm shadow-purple-900/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'"
+                                        :title="client.standby ? 'Устройство в спящем режиме (черный экран). Нажмите для выхода' : 'Формальное выключение: сплошной черный экран без звука'">
+                                    <svg class="w-3.5 h-3.5" :class="client.standby ? 'text-purple-400' : 'text-slate-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                                    <span x-text="client.standby ? 'Спящий режим (Standby)' : 'Standby'"></span>
+                                </button>
+
+                                <!-- 3. Звук (Вкл/Выкл) -->
+                                <button @click="toggleClientAudio(client.client_id, client.audio_enabled)"
+                                        :disabled="actionLoading"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border"
+                                        :class="client.audio_enabled ? 'bg-slate-800 hover:bg-amber-600/20 text-slate-200 border-slate-700' : 'bg-amber-950/40 text-amber-300 border-amber-500/40 hover:bg-amber-900/40'"
+                                        :title="client.audio_enabled ? 'Звук включен. Нажмите для заглушения' : 'Звук заглушен. Нажмите для включения'">
+                                    <span x-text="client.audio_enabled ? '🔊 Звук' : '🔇 Mute'"></span>
+                                </button>
+
+                                <!-- 4. Активное выключение (Дропдаун меню Alpine) -->
+                                <div class="relative" x-data="{ openPowerMenu: false }">
+                                    <button @click="openPowerMenu = !openPowerMenu"
+                                            :disabled="actionLoading || !client.is_online"
+                                            class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/50 hover:text-rose-400 text-slate-400 border border-slate-700 transition disabled:opacity-30 disabled:pointer-events-none"
+                                            title="Удаленное завершение работы">
+                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                    </button>
+                                    <div x-show="openPowerMenu"
+                                         @click.away="openPowerMenu = false"
+                                         x-cloak
+                                         class="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl py-1 z-30 text-xs">
+                                        <button @click="openPowerMenu = false; poweroffClient(client.client_id, 'exit_app')"
+                                                class="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2">
+                                            <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            Закрыть плеер
+                                        </button>
+                                        <button @click="openPowerMenu = false; poweroffClient(client.client_id, 'poweroff')"
+                                                class="w-full text-left px-3 py-2 text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 flex items-center gap-2 border-t border-slate-800">
+                                            <svg class="w-3.5 h-3.5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824-2.126a8.966 8.966 0 014.243-1.414" /></svg>
+                                            Выключить ПК
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- 5. Удалить из сохраненных -->
+                                <button @click="deleteClient(client.client_id, client.custom_name || client.hostname)"
+                                        :disabled="actionLoading"
+                                        class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/30 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
+                                        title="Удалить устройство из базы сохраненных">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div x-show="!clientsData.clients || clientsData.clients.length === 0" class="px-5 py-8 text-center text-xs text-slate-500">
+                        Клиентские устройства пока не подключены.<br>
+                        Запустите плеер на клиенте (<span class="font-mono text-slate-400">python client/main.py</span>), и он сохранится здесь автоматически.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- ВКЛАДКА: УПРАВЛЕНИЕ КЛИЕНТСКИМИ УСТРОЙСТВАМИ -->
+        <!-- ============================================================= -->
+        <div x-show="activeTab === 'clients'" class="space-y-6">
+            <!-- Верхняя строка статистики клиентов -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-4 shadow-sm">
+                    <span class="text-xs text-slate-400 uppercase font-semibold">Всего устройств</span>
+                    <div class="flex items-baseline space-x-2 mt-1">
+                        <span class="text-2xl font-bold text-white font-mono" x-text="(clientsData.clients ? clientsData.clients.length : 0)"></span>
+                        <span class="text-xs text-slate-500">сохранено</span>
+                    </div>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-4 shadow-sm">
+                    <span class="text-xs text-slate-400 uppercase font-semibold">В сети (Онлайн)</span>
+                    <div class="flex items-baseline space-x-2 mt-1">
+                        <span class="text-2xl font-bold text-emerald-400 font-mono" x-text="clientsData.total_connected || 0"></span>
+                        <span class="text-xs text-slate-500">подключено</span>
+                    </div>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-4 shadow-sm">
+                    <span class="text-xs text-slate-400 uppercase font-semibold">В спящем режиме</span>
+                    <div class="flex items-baseline space-x-2 mt-1">
+                        <span class="text-2xl font-bold text-purple-400 font-mono" x-text="(clientsData.clients || []).filter(c => c.standby).length"></span>
+                        <span class="text-xs text-slate-500">Standby (черный экран)</span>
+                    </div>
+                </div>
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-4 shadow-sm">
+                    <span class="text-xs text-slate-400 uppercase font-semibold">Вещание активно</span>
+                    <div class="flex items-baseline space-x-2 mt-1">
+                        <span class="text-2xl font-bold text-cyan-400 font-mono" x-text="(clientsData.clients || []).filter(c => c.stream_allowed).length"></span>
+                        <span class="text-xs text-slate-500">разрешено</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Список устройств (полный вид) -->
+            <div class="bg-slate-900/50 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+                <div class="px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                        <h3 class="text-base font-semibold text-white">Список клиентских экранов и мониторов</h3>
+                        <p class="text-xs text-slate-400 mt-0.5">Индивидуальная настройка прав трансляции, звука и спящего режима для каждого телевизора</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button @click="showAddDeviceModal = true" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-950/50 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-900/50 transition flex items-center gap-1.5 shadow-sm">
+                            <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            + Добавить ТВ (IP)
+                        </button>
+                        <button @click="toggleAllStream(true)" :disabled="actionLoading" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/40 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-900/40 transition">
+                            📺 Разрешить вещание всем
+                        </button>
+                        <button @click="toggleAllStream(false)" :disabled="actionLoading" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-950/40 text-rose-300 border border-rose-500/30 hover:bg-rose-900/40 transition">
+                            ⛔ Запретить вещание всем
+                        </button>
+                        <button @click="toggleAllStandby(true)" :disabled="actionLoading" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-purple-950/40 text-purple-300 border border-purple-500/30 hover:bg-purple-900/40 transition">
+                            🌙 Спящий режим всем
+                        </button>
+                        <button @click="toggleAllStandby(false)" :disabled="actionLoading" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+                            ☀️ Пробудить всех
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Панель быстрых фильтров по операционным системам -->
+                <div class="px-5 py-2.5 bg-slate-950/40 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-slate-400 font-medium text-[11px] uppercase tracking-wider">Фильтр по ОС:</span>
+                        <div class="inline-flex rounded-lg p-0.5 bg-slate-900 border border-slate-800">
+                            <button @click="clientFilterOs = 'all'"
+                                    class="px-2.5 py-1 rounded-md text-xs font-medium transition flex items-center gap-1.5"
+                                    :class="clientFilterOs === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'">
+                                <span>Все</span>
+                                <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono" x-text="getClientCountByOs('all')"></span>
+                            </button>
+                            <button @click="clientFilterOs = 'windows'"
+                                    class="px-2.5 py-1 rounded-md text-xs font-medium transition flex items-center gap-1.5"
+                                    :class="clientFilterOs === 'windows' ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40' : 'text-slate-400 hover:text-slate-200'">
+                                <svg class="w-3 h-3 text-sky-400" viewBox="0 0 24 24" fill="currentColor"><path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/></svg>
+                                <span>Windows</span>
+                                <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-sky-950 text-sky-400 font-mono" x-text="getClientCountByOs('windows')"></span>
+                            </button>
+                            <button @click="clientFilterOs = 'linux'"
+                                    class="px-2.5 py-1 rounded-md text-xs font-medium transition flex items-center gap-1.5"
+                                    :class="clientFilterOs === 'linux' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-slate-400 hover:text-slate-200'">
+                                <svg class="w-3 h-3 text-amber-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12.002 0c-2.484 0-4.5 2.016-4.5 4.5 0 .584.116 1.14.324 1.652C6.182 6.942 5 8.784 5 10.902c0 1.344.474 2.58 1.266 3.55C5.474 15.42 5 16.656 5 18c0 3.314 3.134 6 7 6s7-2.686 7-6c0-1.344-.474-2.58-1.266-3.548.792-.97 1.266-2.206 1.266-3.55 0-2.118-1.182-3.96-2.824-4.75.208-.512.324-1.068.324-1.652 0-2.484-2.016-4.5-4.498-4.5z"/></svg>
+                                <span>Linux</span>
+                                <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-950 text-amber-400 font-mono" x-text="getClientCountByOs('linux')"></span>
+                            </button>
+                            <button @click="clientFilterOs = 'android'"
+                                    class="px-2.5 py-1 rounded-md text-xs font-medium transition flex items-center gap-1.5"
+                                    :class="clientFilterOs === 'android' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'text-slate-400 hover:text-slate-200'">
+                                <svg class="w-3 h-3 text-emerald-400" viewBox="0 0 24 24" fill="currentColor"><path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5896 8.4239 13.8566 8.0838 12 8.0838s-3.5896.3401-5.1368.8659L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+                                </svg>
+                                <span>Android</span>
+                                <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-950 text-emerald-400 font-mono" x-text="getClientCountByOs('android')"></span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="text-[11px] text-slate-500">
+                        Показано: <span class="text-slate-300 font-medium font-mono" x-text="filteredClients().length"></span> из <span class="text-slate-300 font-medium font-mono" x-text="(clientsData.clients || []).length"></span>
+                    </div>
+                </div>
+
+                <div class="divide-y divide-slate-800/60">
+                    <template x-for="client in filteredClients()" :key="client.client_id">
+                        <div class="px-5 py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 text-xs transition"
+                             :class="client.is_online ? 'hover:bg-slate-800/20' : 'bg-slate-950/30 opacity-75 hover:opacity-100'">
+
+                            <!-- Левая колонка: Имя, Сеть, Мониторы, Статус -->
+                            <div class="flex items-start space-x-3.5 min-w-0 flex-1">
+                                <!-- Индикатор онлайн / офлайн -->
+                                <div class="mt-1 flex-shrink-0 flex items-center justify-center">
+                                    <span class="relative flex h-2.5 w-2.5">
+                                        <span x-show="client.is_online" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                        <span class="relative inline-flex rounded-full h-2.5 w-2.5"
+                                              :class="client.is_online ? 'bg-emerald-500' : 'bg-slate-600'"></span>
+                                    </span>
+                                </div>
+
+                                <div class="min-w-0 flex-1">
+                                    <!-- Инлайн редактирование имени или отображение -->
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <!-- Режим редактирования -->
+                                        <template x-if="editingClientId === client.client_id">
+                                            <div class="flex flex-wrap items-center gap-1.5">
+                                                <input type="text"
+                                                       x-model="editingClientName"
+                                                       @keydown.enter="saveClientName(client.client_id)"
+                                                       @keydown.escape="cancelEditClient()"
+                                                       class="px-2 py-0.5 bg-slate-950 text-white font-medium rounded border border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs w-44"
+                                                       placeholder="Имя устройства...">
+                                                <input type="text"
+                                                       x-model="editingClientIp"
+                                                       @keydown.enter="saveClientName(client.client_id)"
+                                                       @keydown.escape="cancelEditClient()"
+                                                       class="px-2 py-0.5 bg-slate-950 text-cyan-300 font-mono text-xs rounded border border-slate-700 focus:outline-none focus:ring-1 focus:ring-cyan-400 w-32"
+                                                       placeholder="IP адрес...">
+                                                <input type="text"
+                                                       x-model="editingClientOs"
+                                                       @keydown.enter="saveClientName(client.client_id)"
+                                                       @keydown.escape="cancelEditClient()"
+                                                       class="px-2 py-0.5 bg-slate-950 text-slate-300 font-medium rounded border border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-400 text-xs w-44"
+                                                       placeholder="ОС (Windows 11/Android)...">
+                                                <button @click="saveClientName(client.client_id)" :disabled="actionLoading" class="p-1 text-emerald-400 hover:text-emerald-300 hover:bg-slate-800 rounded transition" title="Сохранить">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                                </button>
+                                                <button @click="cancelEditClient()" class="p-1 text-slate-400 hover:text-slate-300 hover:bg-slate-800 rounded transition" title="Отмена">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </div>
+                                        </template>
+
+                                        <!-- Режим просмотра -->
+                                        <template x-if="editingClientId !== client.client_id">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <div class="flex items-center gap-1.5 group">
+                                                    <span class="font-semibold text-white text-sm" x-text="client.custom_name || client.hostname"></span>
+                                                    <button @click="startEditClient(client)" class="text-slate-500 hover:text-emerald-400 transition p-0.5 rounded opacity-60 group-hover:opacity-100" title="Редактировать имя, IP и ОС">
+                                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                                                    </button>
+                                                </div>
+
+                                                <!-- Хостнейм -->
+                                                <span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] font-mono border border-slate-700/60" x-text="client.hostname" title="Имя хоста в сети"></span>
+
+                                                <!-- Выделенный бейдж IP адреса с иконкой сети и кнопкой копирования -->
+                                                <div class="inline-flex items-center rounded-md bg-slate-900 border border-cyan-500/30 text-[11px] font-mono shadow-sm overflow-hidden" :title="`Кликните для копирования IP адреса ${client.ip}`">
+                                                    <span class="px-2 py-0.5 text-cyan-300 font-semibold flex items-center gap-1">
+                                                        <svg class="w-3 h-3 text-cyan-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+                                                        </svg>
+                                                        <span x-text="client.ip || '0.0.0.0'"></span>
+                                                    </span>
+                                                    <button @click.stop="copyToClipboard(client.ip)" class="px-1.5 py-0.5 bg-slate-800 hover:bg-cyan-600/30 text-slate-400 hover:text-cyan-300 transition border-l border-cyan-500/30" title="Скопировать IP">
+                                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                                                        </svg>
+                                                    </button>
+                                                </div>
+
+                                                <!-- Статус онлайн/офлайн -->
+                                                <span class="px-1.5 py-0.5 rounded text-[10px]"
+                                                      :class="client.is_online ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-slate-800 text-slate-400'"
+                                                      x-text="client.is_online ? 'В сети' : 'Офлайн'"></span>
+
+                                                <!-- Бейдж подробной операционной системы с брендовой иконкой -->
+                                                <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-medium border shadow-sm"
+                                                      :class="{
+                                                          'bg-sky-500/10 text-sky-300 border-sky-500/30': client.os_family === 'windows',
+                                                          'bg-amber-500/10 text-amber-300 border-amber-500/30': client.os_family === 'linux',
+                                                          'bg-emerald-500/10 text-emerald-300 border-emerald-500/30': client.os_family === 'android',
+                                                          'bg-purple-500/10 text-purple-300 border-purple-500/30': client.os_family === 'macos',
+                                                          'bg-slate-800 text-slate-300 border-slate-700': !['windows', 'linux', 'android', 'macos'].includes(client.os_family)
+                                                      }"
+                                                      :title="`Операционная система: ${client.os_info || client.os_family || 'Неизвестно'}`">
+                                                    <!-- Windows Logo -->
+                                                    <template x-if="client.os_family === 'windows'">
+                                                        <svg class="w-3 h-3 text-sky-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/>
+                                                        </svg>
+                                                    </template>
+                                                    <!-- Linux Logo -->
+                                                    <template x-if="client.os_family === 'linux'">
+                                                        <svg class="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M12.002 0c-2.484 0-4.5 2.016-4.5 4.5 0 .584.116 1.14.324 1.652C6.182 6.942 5 8.784 5 10.902c0 1.344.474 2.58 1.266 3.55C5.474 15.42 5 16.656 5 18c0 3.314 3.134 6 7 6s7-2.686 7-6c0-1.344-.474-2.58-1.266-3.548.792-.97 1.266-2.206 1.266-3.55 0-2.118-1.182-3.96-2.824-4.75.208-.512.324-1.068.324-1.652 0-2.484-2.016-4.5-4.498-4.5z"/>
+                                                        </svg>
+                                                    </template>
+                                                    <!-- Android Logo -->
+                                                    <template x-if="client.os_family === 'android'">
+                                                        <svg class="w-3 h-3 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5896 8.4239 13.8566 8.0838 12 8.0838s-3.5896.3401-5.1368.8659L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+                                                        </svg>
+                                                    </template>
+                                                    <!-- macOS / Other -->
+                                                    <template x-if="!['windows', 'linux', 'android'].includes(client.os_family)">
+                                                        <svg class="w-3 h-3 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                                        </svg>
+                                                    </template>
+                                                    <span class="font-medium" x-text="client.os_info || (client.os_family ? client.os_family.toUpperCase() : 'ОС')"></span>
+                                                </span>
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <!-- Детали экранов и телеметрии -->
+                                    <div class="text-[11px] text-slate-400 mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-slate-500">Экраны:</span>
+                                            <span class="text-slate-300 font-mono" x-text="(client.screens && client.screens.length > 0) ? client.screens.join(', ') : '1 монитор'"></span>
+                                        </div>
+                                        <span class="text-slate-700">•</span>
+                                        <div class="flex items-center gap-1">
+                                            <span class="text-slate-500">Основной (со звуком):</span>
+                                            <span class="text-emerald-400 font-mono" x-text="client.primary_screen || 'Primary'"></span>
+                                        </div>
+                                        <template x-if="client.registered_at">
+                                            <span class="text-slate-700">•</span>
+                                        </template>
+                                        <template x-if="client.registered_at">
+                                            <span class="text-slate-500 font-mono text-[10px]" x-text="`Рег: ${client.registered_at}`"></span>
+                                        </template>
+                                        <template x-if="!client.is_online && client.last_seen_seconds_ago > 0">
+                                            <span class="text-amber-400/80 font-mono text-[10px]" x-text="`Был в сети: ${Math.round(client.last_seen_seconds_ago / 60)} мин назад`"></span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Правая колонка: Органы управления устройством -->
+                            <div class="flex flex-wrap items-center gap-2 flex-shrink-0 w-full md:w-auto justify-start md:justify-end">
+
+                                <!-- 1. Вещание (Разрешить / Запретить) -->
+                                <button @click="toggleClientStream(client.client_id, client.stream_allowed)"
+                                        :disabled="actionLoading"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border"
+                                        :class="client.stream_allowed ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/40' : 'bg-rose-950/40 text-rose-300 border-rose-500/40 hover:bg-rose-900/40'"
+                                        :title="client.stream_allowed ? 'Вещание разрешено. Нажмите для запрета' : 'Вещание запрещено. Нажмите для включения'">
+                                    <span class="w-1.5 h-1.5 rounded-full" :class="client.stream_allowed ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                                    <span x-text="client.stream_allowed ? 'Вещание: ВКЛ' : 'Вещание: ЗАПРЕТ'"></span>
+                                </button>
+
+                                <!-- 2. Формальное выключение (Standby - черный экран и mute) -->
+                                <button @click="toggleClientStandby(client.client_id, client.standby)"
+                                        :disabled="actionLoading"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border"
+                                        :class="client.standby ? 'bg-purple-950/60 text-purple-300 border-purple-500/50 hover:bg-purple-900/50 shadow-sm shadow-purple-900/20' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'"
+                                        :title="client.standby ? 'Устройство в спящем режиме (черный экран). Нажмите для выхода' : 'Формальное выключение: сплошной черный экран без звука'">
+                                    <svg class="w-3.5 h-3.5" :class="client.standby ? 'text-purple-400' : 'text-slate-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                                    <span x-text="client.standby ? 'Спящий режим (Standby)' : 'Standby'"></span>
+                                </button>
+
+                                <!-- 3. Звук (Вкл/Выкл) -->
+                                <button @click="toggleClientAudio(client.client_id, client.audio_enabled)"
+                                        :disabled="actionLoading"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 border"
+                                        :class="client.audio_enabled ? 'bg-slate-800 hover:bg-amber-600/20 text-slate-200 border-slate-700' : 'bg-amber-950/40 text-amber-300 border-amber-500/40 hover:bg-amber-900/40'"
+                                        :title="client.audio_enabled ? 'Звук включен. Нажмите для заглушения' : 'Звук заглушен. Нажмите для включения'">
+                                    <span x-text="client.audio_enabled ? '🔊 Звук' : '🔇 Mute'"></span>
+                                </button>
+
+                                <!-- 4. Сетевое управление Android через ADB (для Android ТВ/приставок) -->
+                                <template x-if="client.os_family === 'android'">
+                                    <div class="relative" x-data="{ openAdbMenu: false }">
+                                        <button @click="openAdbMenu = !openAdbMenu"
+                                                :disabled="actionLoading"
+                                                class="px-2.5 py-1.5 rounded-lg text-xs font-medium bg-emerald-950/50 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/40 transition flex items-center gap-1.5 shadow-sm"
+                                                title="Сетевое управление питанием через ADB">
+                                            <svg class="w-3.5 h-3.5 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M17.523 15.3414c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.551 0 .9993.4482.9993.9993.0001.5511-.4482.9997-.9993.9997m-11.046 0c-.5511 0-.9993-.4486-.9993-.9997s.4482-.9993.9993-.9993c.5511 0 .9993.4482.9993.9993 0 .5511-.4482.9997-.9993.9997m11.4045-6.02l1.9973-3.4592a.416.416 0 00-.1521-.5676.416.416 0 00-.5676.1521l-2.0223 3.503C15.5896 8.4239 13.8566 8.0838 12 8.0838s-3.5896.3401-5.1368.8659L4.8409 5.4467a.4161.4161 0 00-.5677-.1521.4157.4157 0 00-.1521.5676l1.9973 3.4592C2.6889 11.1867.3432 14.6589 0 18.761h24c-.3432-4.1021-2.6889-7.5743-6.1185-9.4396"/>
+                                            </svg>
+                                            <span>ADB Питание</span>
+                                            <svg class="w-3 h-3 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                        </button>
+                                        <div x-show="openAdbMenu"
+                                             @click.away="openAdbMenu = false"
+                                             x-cloak
+                                             class="absolute right-0 mt-1 w-56 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 z-30 text-xs divide-y divide-slate-800">
+                                            <div class="px-3 py-1.5 text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                                                ADB: <span class="text-emerald-400 font-mono" x-text="`${client.ip}:5555`"></span>
+                                            </div>
+                                            <div class="py-1">
+                                                <button @click="openAdbMenu = false; executeAdb(client, 'shutdown')"
+                                                        class="w-full text-left px-3 py-2 text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 flex items-center gap-2 font-medium">
+                                                    <svg class="w-3.5 h-3.5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824-2.126a8.966 8.966 0 014.243-1.414" /></svg>
+                                                    ⚡ Выключить (reboot -p)
+                                                </button>
+                                                <button @click="openAdbMenu = false; executeAdb(client, 'sleep')"
+                                                        class="w-full text-left px-3 py-2 text-purple-300 hover:bg-purple-950/40 flex items-center gap-2">
+                                                    <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                                                    💤 Спящий режим (Экран Off)
+                                                </button>
+                                                <button @click="openAdbMenu = false; executeAdb(client, 'wakeup')"
+                                                        class="w-full text-left px-3 py-2 text-amber-300 hover:bg-amber-950/40 flex items-center gap-2">
+                                                    <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                                    ☀️ Пробудить (Экран On)
+                                                </button>
+                                                <button @click="openAdbMenu = false; executeAdb(client, 'reboot')"
+                                                        class="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 flex items-center gap-2">
+                                                    <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                                    🔄 Перезагрузить ТВ
+                                                </button>
+                                            </div>
+                                            <div class="py-1">
+                                                <button @click="openAdbMenu = false; executeAdb(client, 'get_info')"
+                                                        class="w-full text-left px-3 py-2 text-slate-400 hover:bg-slate-800 hover:text-white flex items-center gap-2">
+                                                    <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                    ℹ️ Опросить модель и ОС
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- 5. Активное выключение ПК (для десктопных клиентов Windows/Linux) -->
+                                <template x-if="client.os_family !== 'android'">
+                                    <div class="relative" x-data="{ openPowerMenu: false }">
+                                        <button @click="openPowerMenu = !openPowerMenu"
+                                                :disabled="actionLoading || !client.is_online"
+                                                class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/50 hover:text-rose-400 text-slate-400 border border-slate-700 transition disabled:opacity-30 disabled:pointer-events-none"
+                                                title="Удаленное завершение работы ПК">
+                                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                        </button>
+                                        <div x-show="openPowerMenu"
+                                             @click.away="openPowerMenu = false"
+                                             x-cloak
+                                             class="absolute right-0 mt-1 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-xl py-1 z-30 text-xs">
+                                            <button @click="openPowerMenu = false; poweroffClient(client.client_id, 'exit_app')"
+                                                    class="w-full text-left px-3 py-2 text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2">
+                                                <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                Закрыть плеер
+                                            </button>
+                                            <button @click="openPowerMenu = false; poweroffClient(client.client_id, 'poweroff')"
+                                                    class="w-full text-left px-3 py-2 text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 flex items-center gap-2 border-t border-slate-800">
+                                                <svg class="w-3.5 h-3.5 text-rose-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824-2.126a8.966 8.966 0 014.243-1.414" /></svg>
+                                                Выключить ПК
+                                            </button>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- 6. Удалить из сохраненных -->
+                                <button @click="deleteClient(client.client_id, client.custom_name || client.hostname)"
+                                        :disabled="actionLoading"
+                                        class="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/30 text-slate-400 hover:text-rose-400 border border-slate-700 transition"
+                                        title="Удалить устройство из базы сохраненных">
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+
+                    <div x-show="!clientsData.clients || clientsData.clients.length === 0" class="px-5 py-8 text-center text-xs text-slate-500">
+                        Клиентские устройства пока не подключены.<br>
+                        Запустите плеер на клиенте (<span class="font-mono text-slate-400">python client/main.py</span>), и он сохранится здесь автоматически.
+                    </div>
+                    <div x-show="clientsData.clients && clientsData.clients.length > 0 && filteredClients().length === 0" class="px-5 py-8 text-center text-xs text-slate-500">
+                        Нет устройств с операционной системой <span class="font-semibold text-slate-300" x-text="clientFilterOs.toUpperCase()"></span>.<br>
+                        Выберите другой фильтр или нажмите «Все».
+                    </div>
+                </div>
+            </div>
+
+            <!-- Модальное окно: Добавление ТВ / Устройства по IP вручную -->
+            <div x-show="showAddDeviceModal"
+                 x-cloak
+                 class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+                <div @click.away="showAddDeviceModal = false"
+                     class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl max-w-md w-full p-5 space-y-4 text-xs">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center gap-2">
+                            <div class="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                            </div>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">Добавить ТВ / Устройство по сети</h3>
+                                <p class="text-[11px] text-slate-400">Для управления питанием по ADB или фиксации экрана</p>
+                            </div>
+                        </div>
+                        <button @click="showAddDeviceModal = false" class="text-slate-400 hover:text-white transition">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-slate-400 font-medium mb-1">IP-адрес устройства (обязательно):</label>
+                            <input type="text"
+                                   x-model="newDevice.ip"
+                                   placeholder="Например: 192.168.1.105"
+                                   class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-medium mb-1">Название устройства:</label>
+                            <input type="text"
+                                   x-model="newDevice.name"
+                                   placeholder="Например: ТВ Переговорная (Xiaomi Box)"
+                                   class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 font-medium mb-1">Операционная система:</label>
+                            <select x-model="newDevice.os"
+                                    class="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                                <option value="Android 13">Android 13</option>
+                                <option value="Android 12">Android 12</option>
+                                <option value="Android 11">Android 11</option>
+                                <option value="Android 10">Android 10</option>
+                                <option value="Android 9 (Pie)">Android 9 (Pie)</option>
+                                <option value="Android TV">Android TV</option>
+                                <option value="Windows 11">Windows 11</option>
+                                <option value="Windows 10">Windows 10</option>
+                                <option value="Linux">Linux</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                        <button @click="showAddDeviceModal = false"
+                                class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium transition">
+                            Отмена
+                        </button>
+                        <button @click="addManualDevice()"
+                                :disabled="actionLoading || !newDevice.ip || !newDevice.ip.trim()"
+                                class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium shadow-sm transition disabled:opacity-50 flex items-center gap-1.5">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            Добавить устройство
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- ВКЛАДКА 2: ОВЕРЛЕИ И ПЛАГИНЫ -->
+        <!-- ============================================================= -->
+        <div x-show="activeTab === 'plugins'" class="space-y-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-base font-semibold text-white">Управление плагинами оверлеев</h2>
+                    <p class="text-xs text-slate-400 mt-0.5">Включенные плагины динамически объединяются в единый граф фильтра FFmpeg (-filter_complex).</p>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <button @click="openAddPluginModal()" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-emerald-500/40 rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                        + Добавить плагин
+                    </button>
+                    <button @click="saveConfig()" :disabled="savingConfig" class="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                        <span x-text="savingConfig ? 'Сохранение...' : 'Сохранить плагины'"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+                <!-- Плагин 1: Водяной знак / Логотип -->
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-3 h-3 rounded-full" :class="(config.plugins.logo && config.plugins.logo.enabled) ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-600'"></span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">Водяной знак (Logo)</h3>
+                                <span class="text-[10px] text-slate-500 font-mono">Системный плагин</span>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" x-model="config.plugins.logo.enabled" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Форма параметров логотипа -->
+                    <div class="space-y-3 text-xs">
+                        <div>
+                            <label class="block text-slate-400 mb-1">Файл изображения (PNG / JPG):</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="text" x-model="config.plugins.logo.image_path" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:border-emerald-500 outline-none">
+                                <label class="cursor-pointer px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 flex-shrink-0">
+                                    <span x-text="uploadingLogo ? 'Загрузка...' : 'Обзор'"></span>
+                                    <input type="file" @change="uploadLogo($event)" accept="image/png,image/jpeg,image/webp" class="hidden">
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-slate-400 mb-1">Позиция на экране:</label>
+                            <select x-model="config.plugins.logo.position" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="top_right">Правый верхний угол</option>
+                                <option value="top_left">Левый верхний угол</option>
+                                <option value="bottom_right">Правый нижний угол</option>
+                                <option value="bottom_left">Левый нижний угол</option>
+                                <option value="center">По центру</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Ширина (scale_width, px):</span>
+                                <span class="font-mono text-emerald-400" x-text="config.plugins.logo.scale_width"></span>
+                            </div>
+                            <input type="range" min="30" max="600" step="10" x-model.number="config.plugins.logo.scale_width" class="w-full accent-emerald-500">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Прозрачность (opacity):</span>
+                                <span class="font-mono text-emerald-400" x-text="config.plugins.logo.opacity"></span>
+                            </div>
+                            <input type="range" min="0.1" max="1.0" step="0.05" x-model.number="config.plugins.logo.opacity" class="w-full accent-emerald-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Плагин 2: Системные часы (drawtext) -->
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-3 h-3 rounded-full" :class="(config.plugins.clock && config.plugins.clock.enabled) ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-600'"></span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">Системные часы (Clock)</h3>
+                                <span class="text-[10px] text-slate-500 font-mono">Системный плагин</span>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" x-model="config.plugins.clock.enabled" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Форма параметров часов -->
+                    <div class="space-y-3 text-xs">
+                        <div>
+                            <label class="block text-slate-400 mb-1">Формат времени:</label>
+                            <select x-model="config.plugins.clock.format" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="HH:mm:ss">HH:mm:ss (14:30:15)</option>
+                                <option value="HH:mm">HH:mm (14:30)</option>
+                                <option value="dd.MM.yyyy HH:mm:ss">dd.MM.yyyy HH:mm:ss</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-slate-400 mb-1">Позиция на экране:</label>
+                            <select x-model="config.plugins.clock.position" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="top_left">Левый верхний угол</option>
+                                <option value="top_right">Правый верхний угол</option>
+                                <option value="bottom_left">Левый нижний угол</option>
+                                <option value="bottom_right">Правый нижний угол</option>
+                            </select>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 mb-1">Размер шрифта:</label>
+                                <input type="number" min="10" max="96" x-model.number="config.plugins.clock.font_size" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 mb-1">Цвет текста:</label>
+                                <input type="text" x-model="config.plugins.clock.font_color" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono">
+                            </div>
+                        </div>
+
+                        <div class="pt-1">
+                            <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
+                                <input type="checkbox" x-model="config.plugins.clock.box_enabled" class="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+                                <span>Полупрозрачная подложка (Box)</span>
+                            </label>
+                        </div>
+
+                        <div x-show="config.plugins.clock.box_enabled">
+                            <label class="block text-slate-400 mb-1">Цвет подложки (HEX с альфа-каналом):</label>
+                            <input type="text" x-model="config.plugins.clock.box_color" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono outline-none focus:border-emerald-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Плагин 3: Картинка в картинке (PiP) -->
+                <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-3 h-3 rounded-full" :class="(config.plugins.pip && config.plugins.pip.enabled) ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-600'"></span>
+                            <div>
+                                <h3 class="text-sm font-semibold text-white">Врезка потока (PiP)</h3>
+                                <span class="text-[10px] text-slate-500 font-mono">Системный плагин</span>
+                            </div>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" x-model="config.plugins.pip.enabled" class="sr-only peer">
+                            <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+
+                    <!-- Форма параметров PiP -->
+                    <div class="space-y-3 text-xs">
+                        <div>
+                            <label class="block text-slate-400 mb-1">URL потока врезки (RTSP / HTTP):</label>
+                            <input type="text" placeholder="rtsp://192.168.1.50:8554/cam" x-model="config.plugins.pip.stream_url" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono outline-none focus:border-emerald-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-slate-400 mb-1">Позиция на экране:</label>
+                            <select x-model="config.plugins.pip.position" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="bottom_right">Правый нижний угол</option>
+                                <option value="bottom_left">Левый нижний угол</option>
+                                <option value="top_right">Правый верхний угол</option>
+                                <option value="top_left">Левый верхний угол</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-slate-400 mb-1">
+                                <span>Ширина врезки (width, px):</span>
+                                <span class="font-mono text-emerald-400" x-text="config.plugins.pip.width"></span>
+                            </div>
+                            <input type="range" min="120" max="640" step="20" x-model.number="config.plugins.pip.width" class="w-full accent-emerald-500">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 mb-1">Отступ X (px):</label>
+                                <input type="number" min="0" max="200" x-model.number="config.plugins.pip.margin_x" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 mb-1">Отступ Y (px):</label>
+                                <input type="number" min="0" max="200" x-model.number="config.plugins.pip.margin_y" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Динамический список пользовательских плагинов -->
+                <template x-for="plugin in telemetry.plugins.filter(p => p.is_custom)" :key="plugin.name">
+                    <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4" x-init="if(!config.plugins[plugin.name]) config.plugins[plugin.name] = { enabled: plugin.enabled }">
+                        <!-- Заголовок карточки плагина -->
+                        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                            <div class="flex items-center space-x-2">
+                                <span class="w-3 h-3 rounded-full" :class="(config.plugins[plugin.name] && config.plugins[plugin.name].enabled) ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-600'"></span>
+                                <div>
+                                    <h3 class="text-sm font-semibold text-white flex items-center gap-1.5">
+                                        <span x-text="plugin.title"></span>
+                                        <span class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/80" x-text="plugin.plugin_type"></span>
+                                    </h3>
+                                    <span class="text-[10px] text-slate-500 font-mono" x-text="plugin.name"></span>
+                                </div>
+                            </div>
+                            <div class="flex items-center space-x-3">
+                                <!-- Переключатель вкл/выкл -->
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" x-model="config.plugins[plugin.name].enabled" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                                </label>
+                                <!-- Кнопка удаления плагина -->
+                                <button @click="deletePlugin(plugin.name, plugin.title)" title="Удалить плагин" class="text-slate-500 hover:text-rose-400 p-1 rounded transition">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 1. Бегущая строка / Текст -->
+                        <template x-if="plugin.plugin_type === 'text_ticker'">
+                            <div class="space-y-3 text-xs">
+                                <div>
+                                    <label class="block text-slate-400 mb-1">Текст надписи:</label>
+                                    <input type="text" x-model="config.plugins[plugin.name].text" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-slate-400 mb-1">Режим:</label>
+                                        <select x-model="config.plugins[plugin.name].mode" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                            <option value="scroll">Бегущая строка</option>
+                                            <option value="static">Статический текст</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 mb-1">Позиция:</label>
+                                        <select x-model="config.plugins[plugin.name].position" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                            <option value="bottom">Снизу</option>
+                                            <option value="top">Сверху</option>
+                                            <option value="center">По центру</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div x-show="config.plugins[plugin.name].mode === 'scroll'">
+                                        <label class="block text-slate-400 mb-1">Скорость (px/s):</label>
+                                        <input type="number" min="20" max="600" x-model.number="config.plugins[plugin.name].speed" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 mb-1">Размер шрифта:</label>
+                                        <input type="number" min="12" max="72" x-model.number="config.plugins[plugin.name].font_size" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono">
+                                    </div>
+                                </div>
+                                <div class="flex items-center space-x-2 pt-1">
+                                    <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
+                                        <input type="checkbox" x-model="config.plugins[plugin.name].box_enabled" class="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+                                        <span>Фоновая подложка</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- 2. FFmpeg Видеофильтр -->
+                        <template x-if="plugin.plugin_type === 'filter'">
+                            <div class="space-y-3 text-xs">
+                                <div>
+                                    <label class="block text-slate-400 mb-1">Выражение FFmpeg фильтра:</label>
+                                    <textarea x-model="config.plugins[plugin.name].filter_expr" rows="3" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 font-mono outline-none focus:border-emerald-500 text-[11px]"></textarea>
+                                    <p class="text-[10px] text-slate-500 mt-1">Примеры: eq=brightness=0.03:contrast=1.1, curves=vintage, boxblur=2:1, vignette=PI/4</p>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- 3. Пользовательский баннер / Графика -->
+                        <template x-if="plugin.plugin_type === 'image'">
+                            <div class="space-y-3 text-xs">
+                                <div>
+                                    <label class="block text-slate-400 mb-1">Файл изображения:</label>
+                                    <div class="flex items-center space-x-2">
+                                        <input type="text" x-model="config.plugins[plugin.name].image_path" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono focus:border-emerald-500 outline-none">
+                                        <label class="cursor-pointer px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 flex-shrink-0">
+                                            <span>Обзор</span>
+                                            <input type="file" @change="uploadCustomPluginImage($event, plugin.name)" accept="image/png,image/jpeg,image/webp" class="hidden">
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="block text-slate-400 mb-1">Ширина (px):</label>
+                                        <input type="number" min="30" max="800" x-model.number="config.plugins[plugin.name].scale_width" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono">
+                                    </div>
+                                    <div>
+                                        <label class="block text-slate-400 mb-1">Позиция:</label>
+                                        <select x-model="config.plugins[plugin.name].position" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                            <option value="bottom_left">Левый нижний угол</option>
+                                            <option value="bottom_right">Правый нижний угол</option>
+                                            <option value="top_left">Левый верхний угол</option>
+                                            <option value="top_right">Правый верхний угол</option>
+                                            <option value="center">По центру</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- 4. Python-плагин -->
+                        <template x-if="plugin.plugin_type === 'python'">
+                            <div class="space-y-2 text-xs">
+                                <p class="text-slate-400">Пользовательский модуль Python (загружен из <span class="font-mono text-emerald-400">plugins_custom/</span>).</p>
+                                <p class="text-[11px] text-slate-500">Для изменения логики отредактируйте файл на сервере либо удалите и загрузите обновленный.</p>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+            </div>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- ВКЛАДКА 3: НАСТРОЙКИ СЕРВЕРА -->
+        <!-- ============================================================= -->
+        <div x-show="activeTab === 'settings'" class="max-w-3xl space-y-6">
+            <div>
+                <h2 class="text-base font-semibold text-white">Параметры вещания и медиа</h2>
+                <p class="text-xs text-slate-400 mt-0.5">Конфигурация сохраняется в config/settings.json с валидацией через Pydantic v2.</p>
+            </div>
+
+            <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-6 shadow-sm space-y-5">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Путь к папке с видеофайлами (media_dir):</label>
+                    <input type="text" x-model="config.media_dir" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                    <p class="text-[11px] text-slate-500 mt-1">Поддерживает как относительные пути (напр. media), так и абсолютные пути Windows (D:\media) и Linux (/mnt/media).</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Интервал сканирования папки (сек):</label>
+                        <input type="number" min="1" max="3600" x-model.number="config.scan_interval" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Лимит сбоев Circuit Breaker:</label>
+                        <input type="number" min="1" max="50" x-model.number="config.circuit_breaker.max_consecutive_errors" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Целевой RTSP URL (MediaMTX):</label>
+                    <input type="text" x-model="config.rtsp_target_url" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                    <p class="text-[11px] text-slate-500 mt-1">По умолчанию: rtsp://localhost:8554/live (для Docker: rtsp://mediamtx:8554/live).</p>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">MediaMTX HLS URL (для веб-плеера):</label>
+                    <input type="text" x-model="config.mediamtx_hls_url" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                </div>
+
+                <div class="pt-4 border-t border-slate-800 flex justify-end">
+                    <button @click="saveConfig()" :disabled="savingConfig" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                        <span x-text="savingConfig ? 'Сохранение...' : 'Применить настройки'"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Карточка: Безопасность и авторизация -->
+            <div class="bg-slate-900/50 border border-slate-800 rounded-xl p-6 shadow-sm space-y-5">
+                <div>
+                    <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+                        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                        Безопасность и авторизация
+                    </h3>
+                    <p class="text-xs text-slate-400 mt-0.5">Управление доступом к панели вещания через локального пользователя и Active Directory.</p>
+                </div>
+
+                <!-- Подраздел: Локальный пользователь -->
+                <div class="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                            <span class="text-xs font-semibold text-slate-200">Учетная запись сайта (Локальный вход)</span>
+                        </div>
+                        <span class="text-[11px] font-mono px-2 py-0.5 bg-slate-900 border border-slate-800 rounded text-slate-400" x-text="'Логин: ' + (config.auth?.local?.username || 'admin')"></span>
+                    </div>
+
+                    <!-- Смена пароля -->
+                    <form @submit.prevent="changePassword()" class="space-y-3 pt-2">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">Текущий пароль:</label>
+                                <input type="password" x-model="changePasswordData.oldPassword" required placeholder="••••••••" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">Новый пароль:</label>
+                                <input type="password" x-model="changePasswordData.newPassword" required placeholder="Минимум 4 символа" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-emerald-500">
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between pt-1">
+                            <span class="text-[11px]" :class="changePasswordData.status === 'success' ? 'text-emerald-400' : 'text-rose-400'" x-text="changePasswordData.message"></span>
+                            <button type="submit" :disabled="changePasswordData.loading" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 transition flex items-center gap-1.5">
+                                <span x-text="changePasswordData.loading ? 'Обновление...' : 'Сменить локальный пароль'"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Подраздел: Active Directory -->
+                <div class="p-4 bg-slate-950/60 rounded-xl border border-slate-800/80 space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full" :class="config.auth?.domain?.enabled ? 'bg-blue-400' : 'bg-slate-600'"></span>
+                            <span class="text-xs font-semibold text-slate-200">Контроллер домена (Active Directory)</span>
+                            <span class="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                                AES-128 Шифрование пароля
+                            </span>
+                        </div>
+                        <label class="flex items-center gap-2 cursor-pointer select-none">
+                            <input type="checkbox" x-model="config.auth.domain.enabled" class="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0">
+                            <span class="text-xs text-slate-300 font-medium">Включить доменную авторизацию</span>
+                        </label>
+                    </div>
+
+                    <!-- Форма параметров AD -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Сервер контроллера (IP или FQDN):</label>
+                            <input type="text" x-model="config.auth.domain.server" placeholder="dc01.gp1.loc" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Порт LDAP:</label>
+                            <input type="number" x-model.number="config.auth.domain.port" placeholder="389" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                        </div>
+                        <div class="flex items-end pb-2">
+                            <label class="flex items-center gap-2 cursor-pointer select-none">
+                                <input type="checkbox" x-model="config.auth.domain.use_ssl" class="rounded bg-slate-900 border-slate-700 text-blue-600 focus:ring-0">
+                                <span class="text-xs text-slate-300">Использовать LDAPS (SSL/TLS)</span>
+                            </label>
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Домен (FQDN / NetBIOS):</label>
+                            <input type="text" x-model="config.auth.domain.domain" placeholder="gp1.loc" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Базовый DN (Base DN):</label>
+                            <input type="text" x-model="config.auth.domain.base_dn" placeholder="DC=gp1,DC=loc" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Группа администраторов:</label>
+                            <input type="text" x-model="config.auth.domain.admin_group" placeholder="Администраторы домена" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-slate-400 mb-1">Сервисная учетная запись:</label>
+                            <input type="text" x-model="config.auth.domain.service_user" placeholder="tvuser" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-[11px] text-slate-400 mb-1 flex items-center justify-between">
+                                <span>Пароль сервисной учетной записи:</span>
+                                <span x-show="config.auth?.domain?.has_service_password" class="text-emerald-400 font-mono text-[10px]">● Пароль сохранен в зашифрованном виде</span>
+                            </label>
+                            <div class="relative">
+                                <input :type="showAdPassword ? 'text' : 'password'" 
+                                       x-model="adPasswordInput" 
+                                       :placeholder="config.auth?.domain?.has_service_password ? '•••••••• (оставьте пустым, чтобы не менять)' : 'Введите сервисный пароль'" 
+                                       class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 pr-10 text-xs text-slate-200 font-mono outline-none focus:border-blue-500">
+                                <button type="button" @click="showAdPassword = !showAdPassword" class="absolute right-2.5 top-2 text-slate-400 hover:text-slate-200">
+                                    <svg x-show="!showAdPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                    <svg x-show="showAdPassword" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l18 18"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Действия и статус проверки связи -->
+                    <div class="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
+                        <div class="text-[11px] flex items-center gap-1.5" x-show="adTestStatus.message">
+                            <span class="w-2 h-2 rounded-full" :class="adTestStatus.success ? 'bg-emerald-400' : 'bg-rose-400'"></span>
+                            <span :class="adTestStatus.success ? 'text-emerald-400' : 'text-rose-400'" x-text="adTestStatus.message"></span>
+                        </div>
+                        <div x-show="!adTestStatus.message" class="text-[11px] text-slate-500">
+                            Пароль при сохранении шифруется ключом AES в <span class="font-mono text-slate-400">config/settings.json</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button type="button" @click="testAdConnection()" :disabled="adTestStatus.testing" class="px-3.5 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 rounded-lg text-xs font-medium border border-blue-500/40 transition flex items-center gap-1.5">
+                                <svg x-show="adTestStatus.testing" class="animate-spin w-3.5 h-3.5 text-blue-400" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span x-text="adTestStatus.testing ? 'Проверка...' : 'Проверить связь с AD'"></span>
+                            </button>
+                            <button type="button" @click="saveAdConfig()" :disabled="savingAdConfig" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium shadow-sm transition flex items-center gap-1.5">
+                                <svg x-show="savingAdConfig" class="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span x-text="savingAdConfig ? 'Сохранение...' : 'Сохранить параметры AD'"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- ВКЛАДКА 4: ЖИВЫЕ ЛОГИ (КОНСОЛЬ) -->
+        <!-- ============================================================= -->
+        <div x-show="activeTab === 'logs'" class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center space-x-3">
+                    <h2 class="text-base font-semibold text-white">Консоль сервера (logs/server.log)</h2>
+                    <span class="text-xs text-slate-500 font-mono" x-text="`Записей: ${filteredLogs.length}`"></span>
+                </div>
+
+                <div class="flex items-center space-x-3 text-xs">
+                    <!-- Фильтр логов -->
+                    <div class="bg-slate-900 border border-slate-800 rounded-lg p-0.5 flex">
+                        <button @click="logFilter = 'all'" :class="logFilter === 'all' ? 'bg-slate-800 text-slate-200' : 'text-slate-400 hover:text-slate-200'" class="px-3 py-1 rounded-md transition font-medium">Все</button>
+                        <button @click="logFilter = 'errors'" :class="logFilter === 'errors' ? 'bg-slate-800 text-rose-300' : 'text-slate-400 hover:text-slate-200'" class="px-3 py-1 rounded-md transition font-medium">Только ошибки</button>
+                    </div>
+
+                    <!-- Чекбокс автоскролла -->
+                    <label class="flex items-center space-x-1.5 text-slate-400 cursor-pointer">
+                        <input type="checkbox" x-model="autoScrollLogs" class="rounded bg-slate-800 border-slate-700 text-emerald-500 focus:ring-0">
+                        <span>Автоскролл</span>
+                    </label>
+
+                    <!-- Очистка окна -->
+                    <button @click="clearLogs()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition">
+                        Очистить
+                    </button>
+                </div>
+            </div>
+
+            <!-- Окно терминала -->
+            <div id="logTerminal" class="bg-[#040711] border border-slate-800 rounded-xl p-4 font-mono text-xs text-slate-300 h-[600px] overflow-y-auto space-y-1.5 leading-relaxed shadow-inner">
+                <template x-for="(log, idx) in filteredLogs" :key="idx">
+                    <div class="flex items-start space-x-2 py-0.5 hover:bg-slate-900/40 rounded px-1 transition">
+                        <span class="text-slate-500 select-none flex-shrink-0" x-text="log.timestamp"></span>
+                        <span class="uppercase text-[10px] tracking-wide flex-shrink-0" :class="getLogLevelClass(log.level)" x-text="log.level"></span>
+                        <span class="text-slate-400 flex-shrink-0" x-text="`[${log.name}]:`"></span>
+                        <span class="text-slate-200 break-all" x-text="log.message"></span>
+                    </div>
+                </template>
+                <div x-show="filteredLogs.length === 0" class="text-center py-20 text-slate-600">
+                    Логов пока нет. Ожидание событий...
+                </div>
+            </div>
+        </div>
+
+    <!-- Модальное окно: Добавление нового плагина -->
+    <div x-show="showAddPluginModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 overflow-y-auto">
+        <div class="bg-[#0f172a] border border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 my-8 text-slate-100" @click.outside="showAddPluginModal = false">
+
+            <!-- Заголовок модального окна -->
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                    <h3 class="text-base font-semibold text-white flex items-center gap-2">
+                        <span>Добавить оверлей-плагин</span>
+                        <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-mono">Dynamic</span>
+                    </h3>
+                    <p class="text-xs text-slate-400 mt-0.5">Создайте плагин через визуальный конструктор или загрузите Python-модуль (.py)</p>
+                </div>
+                <button @click="showAddPluginModal = false" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+
+            <!-- Переключатель режима создания -->
+            <div class="flex space-x-2 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs font-medium">
+                <button @click="addPluginTab = 'visual'" :class="addPluginTab === 'visual' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'" class="flex-1 py-2 rounded-lg transition text-center">
+                    Визуальный конструктор (No-Code)
+                </button>
+                <button @click="addPluginTab = 'python'" :class="addPluginTab === 'python' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-400 hover:text-white'" class="flex-1 py-2 rounded-lg transition text-center">
+                    Загрузка / Редактор Python (.py)
+                </button>
+            </div>
+
+            <!-- ВАРИАНТ 1: ВИЗУАЛЬНЫЙ КОНСТРУКТОР -->
+            <div x-show="addPluginTab === 'visual'" class="space-y-4 text-xs">
+                <!-- Выбор типа визуального плагина -->
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-2">Тип плагина:</label>
+                    <div class="grid grid-cols-3 gap-3">
+                        <button type="button" @click="newPlugin.type = 'text_ticker'" :class="newPlugin.type === 'text_ticker' ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'" class="p-3 rounded-xl border text-left transition flex flex-col justify-between">
+                            <span class="font-semibold text-slate-200">Бегущая строка</span>
+                            <span class="text-[10px] text-slate-500 mt-1">Текст, новости, титры</span>
+                        </button>
+                        <button type="button" @click="newPlugin.type = 'filter'" :class="newPlugin.type === 'filter' ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'" class="p-3 rounded-xl border text-left transition flex flex-col justify-between">
+                            <span class="font-semibold text-slate-200">Видеофильтр FFmpeg</span>
+                            <span class="text-[10px] text-slate-500 mt-1">Цветокоррекция, размытие</span>
+                        </button>
+                        <button type="button" @click="newPlugin.type = 'image'" :class="newPlugin.type === 'image' ? 'border-emerald-500 bg-emerald-500/10 text-white' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700'" class="p-3 rounded-xl border text-left transition flex flex-col justify-between">
+                            <span class="font-semibold text-slate-200">Баннер / Графика</span>
+                            <span class="text-[10px] text-slate-500 mt-1">Спонсорская плашка, QR</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Общие поля: ID и Название -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-slate-300 mb-1">Системный ID (латиницей):</label>
+                        <input type="text" placeholder="news_ticker" x-model="newPlugin.name" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 mb-1">Название для панели:</label>
+                        <input type="text" placeholder="Информационная строка" x-model="newPlugin.title" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+
+                <!-- Поля для Бегущей строки -->
+                <div x-show="newPlugin.type === 'text_ticker'" class="space-y-3 p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl">
+                    <div>
+                        <label class="block text-slate-300 mb-1">Текст надписи:</label>
+                        <input type="text" x-model="newPlugin.text" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                    </div>
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label class="block text-slate-300 mb-1">Режим:</label>
+                            <select x-model="newPlugin.textMode" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="scroll">Бегущая строка</option>
+                                <option value="static">Статический текст</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-slate-300 mb-1">Положение:</label>
+                            <select x-model="newPlugin.textPosition" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="bottom">Снизу экрана</option>
+                                <option value="top">Сверху экрана</option>
+                                <option value="center">По центру</option>
+                            </select>
+                        </div>
+                        <div x-show="newPlugin.textMode === 'scroll'">
+                            <label class="block text-slate-300 mb-1">Скорость (px/s):</label>
+                            <input type="number" min="20" max="600" x-model.number="newPlugin.textSpeed" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Поля для Видеофильтра -->
+                <div x-show="newPlugin.type === 'filter'" class="space-y-3 p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl">
+                    <div>
+                        <label class="block text-slate-300 mb-1">Готовый пресет:</label>
+                        <select x-model="newPlugin.filterPreset" @change="onPresetChange()" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                            <option value="color_boost">Насыщенность и контраст (Color Boost)</option>
+                            <option value="warm_vintage">Теплый ретро-винтаж (Vintage)</option>
+                            <option value="vignette">Кинематографичная виньетка (Vignette)</option>
+                            <option value="soft_blur">Легкое размытие (Soft Blur)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 mb-1">Выражение фильтра FFmpeg:</label>
+                        <textarea x-model="newPlugin.filterExpr" rows="2" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-200 font-mono outline-none focus:border-emerald-500 text-[11px]"></textarea>
+                    </div>
+                </div>
+
+                <!-- Поля для Баннера -->
+                <div x-show="newPlugin.type === 'image'" class="space-y-3 p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-300 mb-1">Положение на экране:</label>
+                            <select x-model="newPlugin.imagePosition" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500">
+                                <option value="bottom_left">Левый нижний угол</option>
+                                <option value="bottom_right">Правый нижний угол</option>
+                                <option value="top_left">Левый верхний угол</option>
+                                <option value="top_right">Правый верхний угол</option>
+                                <option value="center">По центру</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-slate-300 mb-1">Ширина (px):</label>
+                            <input type="number" min="30" max="800" x-model.number="newPlugin.imageScaleWidth" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 outline-none focus:border-emerald-500 font-mono">
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-500">Файл картинки можно будет загрузить сразу после создания плагина в карточке настроек.</p>
+                </div>
+
+                <!-- Кнопка отправки -->
+                <div class="pt-2 flex justify-end">
+                    <button @click="createVisualPlugin()" :disabled="installingPlugin" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold shadow-sm transition flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                        <span x-text="installingPlugin ? 'Создание...' : 'Создать и подключить плагин'"></span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- ВАРИАНТ 2: ЗАГРУЗКА PYTHON (.PY) -->
+            <div x-show="addPluginTab === 'python'" class="space-y-4 text-xs">
+                <div>
+                    <label class="block font-semibold text-slate-300 mb-1.5">Способ 1: Загрузить готовый .py файл</label>
+                    <label class="flex flex-col items-center justify-center p-4 border-2 border-dashed border-slate-700 hover:border-emerald-500/50 rounded-xl cursor-pointer bg-slate-950/60 transition">
+                        <svg class="w-8 h-8 text-slate-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                        <span class="text-slate-300 font-medium">Выберите файл плагина (.py)</span>
+                        <span class="text-[10px] text-slate-500 mt-0.5">Плагин будет автоматически проверен и подключен на лету</span>
+                        <input type="file" @change="uploadPythonFile($event)" accept=".py" class="hidden">
+                    </label>
+                </div>
+
+                <div class="relative flex py-1 items-center">
+                    <div class="flex-grow border-t border-slate-800"></div>
+                    <span class="flex-shrink mx-4 text-slate-500 text-[11px] uppercase tracking-wider">ИЛИ</span>
+                    <div class="flex-grow border-t border-slate-800"></div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="block font-semibold text-slate-300">Способ 2: Редактор Python-кода плагина</label>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Имя плагина (системный ID):</label>
+                        <input type="text" placeholder="my_custom_overlay" x-model="newPlugin.pythonName" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 font-mono outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Исходный код плагина (наследует BaseOverlayPlugin):</label>
+                        <textarea x-model="newPlugin.pythonCode" rows="9" class="w-full bg-[#040711] border border-slate-800 rounded-lg p-3 text-emerald-400 font-mono outline-none focus:border-emerald-500 text-[11px] leading-relaxed"></textarea>
+                    </div>
+                    <div class="flex justify-end pt-1">
+                        <button @click="installPythonPlugin()" :disabled="installingPlugin" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold shadow-sm transition flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span x-text="installingPlugin ? 'Проверка...' : 'Проверить и установить Python-плагин'"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Модальное окно переименования медиафайла -->
+    <div x-show="showRenameModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div @click.away="showRenameModal = false" class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="text-sm font-semibold text-white">Переименование медиафайла</h3>
+                <button @click="showRenameModal = false" class="text-slate-400 hover:text-white text-lg">&times;</button>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1">Текущее имя файла:</label>
+                    <input type="text" :value="renameTarget.oldName" readonly class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 font-mono">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-300 font-medium mb-1">Новое имя файла:</label>
+                    <input type="text" x-model="renameTarget.newName" @keydown.enter="submitRename()" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-cyan-500 focus:outline-none" placeholder="например: new_video.mp4">
+                    <p class="text-[11px] text-slate-500 mt-1">Расширение файла сохранится автоматически, если не указано.</p>
+                </div>
+            </div>
+            <div class="flex items-center justify-end space-x-3 pt-2">
+                <button @click="showRenameModal = false" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition">Отмена</button>
+                <button @click="submitRename()" :disabled="actionLoading || !renameTarget.newName" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold transition">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Всплывающие уведомления (Toasts) -->
+    <div class="fixed bottom-5 right-5 z-50 space-y-2 max-w-sm">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div class="px-4 py-3 rounded-lg text-xs font-medium shadow-lg backdrop-blur-md flex items-center space-x-2 transition-all transform"
+                 :class="toast.type === 'error' ? 'bg-rose-950/90 text-rose-200 border border-rose-500/50' : (toast.type === 'success' ? 'bg-emerald-950/90 text-emerald-200 border border-emerald-500/50' : 'bg-slate-900/90 text-slate-200 border border-slate-700')">
+                <span x-text="toast.message"></span>
+            </div>
+        </template>
+    </div>
+
+</body>
+</html>

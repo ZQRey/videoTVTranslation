@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Потоковый движок MediaMTX (раздача RTSP и HLS)
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx-server
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP TCP/UDP
+      - "8888:8888"   # HLS (HTTP Live Streaming)
+      - "1935:1935"   # RTMP
+    environment:
+      - MTX_PROTOCOLS=tcp,udp
+      - MTX_RTSPADDRESS=:8554
+      - MTX_HLSADDRESS=:8888
+    networks:
+      - stream-net
+
+  # Основной сервис медиасервера вещания с веб-панелью
+  stream-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stream-core-server
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # Веб-панель управления и REST API
+    volumes:
+      - ./media:/app/media
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./plugins_custom:/app/plugins_custom
+    environment:
+      - RTSP_TARGET_URL=rtsp://mediamtx:8554/live
+      - MEDIAMTX_HLS_URL=http://localhost:8888/live
+      - MEDIA_DIR=/app/media
+      - WEB_PORT=8000
+    depends_on:
+      - mediamtx
+    networks:
+      - stream-net
+
+networks:
+  stream-net:
+    driver: bridge

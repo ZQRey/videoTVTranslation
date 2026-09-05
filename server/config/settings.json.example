@@ -1,0 +1,58 @@
+{
+  "media_dir": "media",
+  "scan_interval": 10,
+  "rtsp_target_url": "rtsp://localhost:8554/live",
+  "mediamtx_hls_url": "http://localhost:8888/live",
+  "web_host": "0.0.0.0",
+  "web_port": 8000,
+  "circuit_breaker": {
+    "max_consecutive_errors": 10,
+    "healthy_playback_threshold_sec": 15.0
+  },
+  "plugins": {
+    "logo": {
+      "enabled": false,
+      "image_path": "config/logo.png",
+      "position": "top_right",
+      "scale_width": 160,
+      "opacity": 0.85
+    },
+    "clock": {
+      "enabled": false,
+      "position": "top_left",
+      "format": "HH:mm:ss",
+      "font_size": 28,
+      "font_color": "white",
+      "box_enabled": true,
+      "box_color": "0x00000080"
+    },
+    "pip": {
+      "enabled": false,
+      "stream_url": "",
+      "position": "bottom_right",
+      "width": 320,
+      "margin_x": 20,
+      "margin_y": 20
+    }
+  },
+  "custom_plugins_meta": {},
+  "auth": {
+    "session_lifetime_hours": 24,
+    "local": {
+      "enabled": true,
+      "username": "admin",
+      "password_hash": ""
+    },
+    "domain": {
+      "enabled": false,
+      "server": "dc01.example.com",
+      "port": 389,
+      "use_ssl": false,
+      "domain": "example.com",
+      "base_dn": "DC=example,DC=com",
+      "service_user": "tvuser",
+      "service_password": "",
+      "admin_group": "Domain Admins"
+    }
+  }
+}

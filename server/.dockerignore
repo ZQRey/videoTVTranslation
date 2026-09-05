@@ -1,0 +1,16 @@
+# Исключения для сборки Docker-образа медиасервера
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+logs/
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+mediamtx.exe
+bin/adb/windows/
+.git/
+.gitignore
